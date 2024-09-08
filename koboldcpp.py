@@ -601,6 +601,7 @@ def string_contains_or_overlaps_sequence_substring(inputstr, sequences):
     return False
 
 def read_gguf_metadata(file_path):
+    print(f'Reading GGUF metadata from {file_path}')
     chunk_size = 8192  # read only first 8kb of file
     try:
         def read_gguf_key(keyname,data,maxval):
@@ -625,12 +626,14 @@ def read_gguf_metadata(file_path):
         with open(file_path, 'rb') as f:
             file_header = f.read(4)
             if file_header != b'GGUF': #file is not GGUF
+                print(f'File is not GGUF format')
                 return None
             data = f.read(chunk_size)
             layercount = read_gguf_key(b'.block_count',data,512)
             head_count_kv = read_gguf_key(b'.attention.head_count_kv',data,8192)
             key_length = read_gguf_key(b'.attention.key_length',data,8192)
             val_length = read_gguf_key(b'.attention.value_length',data,8192)
+            print(f'GGUF metadata: {layercount} layers, {head_count_kv} heads, {max(key_length,val_length)} key/val length')
             return [layercount,head_count_kv, max(key_length,val_length)]
     except Exception:
         return None
@@ -890,11 +893,20 @@ def load_model(model_filename):
     ret = handle.load_model(inputs)
     return ret
 
+import koboldcpp_promt_template
 def generate(genparams, is_quiet=False, stream_flag=False):
     global maxctx, args, currentusergenkey, totalgens, pendingabortkey
 
     prompt = genparams.get('prompt', "")
     memory = genparams.get('memory', "")
+    
+    print('\n================================')
+    print(f"接收到的消息：{prompt}\n记忆：{memory}")
+    print('--------------------------------')
+    prompt, memory = koboldcpp_promt_template.prompt_template(prompt, memory)
+    print(f"模板处理后的消息：{prompt}\n记忆：{memory}")
+    print('================================\n')
+    
     images = genparams.get('images', [])
     max_context_length = genparams.get('max_context_length', maxctx)
     max_length = genparams.get('max_length', 200)
@@ -1744,6 +1756,10 @@ class ServerRequestHandler(http.server.SimpleHTTPRequestHandler):
         tasks = []
 
         genparams = transform_genparams(raw_genparams, api_format)
+        print('\n=================')
+        print(f"API Format: {api_format}")
+        print(f"GenParams: {genparams}")
+        print('=================\n')
 
         try:
             if stream_flag:
@@ -2604,8 +2620,8 @@ def show_gui():
 
     import customtkinter as ctk
     nextstate = 0 #0=exit, 1=launch
-    original_windowwidth = 580
-    original_windowheight = 560
+    original_windowwidth = 680
+    original_windowheight = 550
     windowwidth = original_windowwidth
     windowheight = original_windowheight
     ctk.set_appearance_mode("dark")
@@ -3798,6 +3814,9 @@ def show_gui():
     else:
         # processing vars
         kcpp_exporting_template = False
+        print('=================')
+        print('Program start!!!')
+        print('=================\n')
         export_vars()
 
         if not args.model_param and not args.sdmodel and not args.whispermodel and not args.nomodel:
@@ -4580,7 +4599,7 @@ def main(launch_args,start_server=True):
         print(f"Auto Set Threads: {args.threads}")
 
     init_library() # Note: if blas does not exist and is enabled, program will crash.
-    print("==========")
+    print("===========================================================\n")
     time.sleep(1)
 
     #handle loading text model
