@@ -894,6 +894,7 @@ def load_model(model_filename):
     return ret
 
 import koboldcpp_promt_template
+from importlib import reload as reload_module
 def generate(genparams, is_quiet=False, stream_flag=False):
     global maxctx, args, currentusergenkey, totalgens, pendingabortkey
 
@@ -901,10 +902,15 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     memory = genparams.get('memory', "")
     
     print('\n================================')
-    print(f"接收到的消息：{prompt}\n记忆：{memory}")
+    print(f"接收到的消息：{prompt}\n当前的记忆：{memory}")
+    with open('last_data.txt', 'w', encoding='utf-8') as f:
+        f.write(prompt)
+        f.write('\n-------------------------\n')
+        f.write(memory)
     print('--------------------------------')
+    reload_module(koboldcpp_promt_template)
     prompt, memory = koboldcpp_promt_template.prompt_template(prompt, memory)
-    print(f"模板处理后的消息：{prompt}\n记忆：{memory}")
+    print(f"模板处理后的消息：{prompt}\n当前的记忆：{memory}")
     print('================================\n')
     
     images = genparams.get('images', [])
@@ -1102,7 +1108,8 @@ def generate(genparams, is_quiet=False, stream_flag=False):
                 sindex = outstr.find(trim_str)
                 if sindex != -1 and trim_str!="":
                     outstr = outstr[:sindex]
-        return {"text":outstr,"status":ret.status,"stopreason":ret.stopreason,"prompt_tokens":ret.prompt_tokens, "completion_tokens": ret.completion_tokens}
+        outstr = koboldcpp_promt_template.out_post_process(outstr)
+        return {"text":outstr,"status":ret.status,"stopreason":ret.stopreason}
 
 
 def sd_load_model(model_filename,vae_filename,lora_filename,t5xxl_filename,clipl_filename,clipg_filename):
@@ -1757,6 +1764,7 @@ class ServerRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         genparams = transform_genparams(raw_genparams, api_format)
         print('\n=================')
+        print("接收到的消息：")
         print(f"API Format: {api_format}")
         print(f"GenParams: {genparams}")
         print('=================\n')
@@ -2372,6 +2380,10 @@ Enter Prompt:<br>
 
                 genparams = None
                 try:
+                    print('\n========================================')
+                    print("JSON体: ")
+                    print(body)
+                    print('========================================\n')
                     genparams = json.loads(body)
                 except Exception:
                     genparams = None

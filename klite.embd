@@ -12509,6 +12509,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 			if (newgen != "") {
 				gametext_arr.push(newgen);
+				console.log('新的输入: ' + newgen);
 			}
 			redo_arr = [];
 			retry_prev_text = [];
@@ -12569,6 +12570,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 			let truncated_context = concat_gametext(true, "","","",false,true); //no need to truncate if memory is empty
 			truncated_context = truncated_context.replace(/\xA0/g,' '); //replace non breaking space nbsp
+			console.log("Context: " + truncated_context);
+			console.log("Memory: " + current_memory);
 
 			//this is a hack since we dont have a proper tokenizer, but we can estimate 1 token per 3 characters
 			let chars_per_token = 3.0;
@@ -12762,7 +12765,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 				max_mem_len = Math.floor(max_allowed_characters*0.7);
 				appendedsysprompt = get_instruct_systag(false) + localsettings.instruct_sysprompt + "\n";
 			}
-			let truncated_memory = substring_to_boundary(current_memory, max_mem_len);
+			let truncated_memory = appendedsysprompt + substring_to_boundary(current_memory, max_mem_len);
+			console.log('裁剪后的记忆：' + truncated_memory);
 			if (truncated_memory != null && truncated_memory != "") {
 				if(newlineaftermemory)
 				{
@@ -12942,6 +12946,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 				}
 			}
 
+			console.log("结合了笔记的上下文：" + truncated_context);
+
 			truncated_memory = replace_placeholders(truncated_memory);
 			truncated_context = replace_placeholders(truncated_context);
 
@@ -12954,6 +12960,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 				last_token_budget = truncated_context.length  + "/" + max_allowed_characters;
 			}
 
+			console.log("结合了记忆的上下文：" + truncated_context);
 
 			let submit_payload = {
 				"prompt": truncated_context,
@@ -13006,6 +13013,10 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 			}else{
 				lastcheckgenkey = "";
 			}
+			
+			console.log("=============================\n提交的内容:")
+			console.log(submit_payload);
+			console.log("=============================")
 
 			//v2 api specific fields
 			submit_payload.workers = selected_workers.map((m)=>{return m.id});
@@ -20728,6 +20739,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 </body>
 
 <script>
+original_console_log = console.log;
+
 init();
 
 //this is needed for PWA to work on chrome, so users can install KoboldAI Lite to device
