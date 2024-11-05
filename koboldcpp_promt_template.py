@@ -2,7 +2,9 @@ import re
 
 
 def debug_print(*args, **kwargs):
+    return
     print(*args, **kwargs)
+    print('-' * 100)
 
 
 class UserDefinedTags:
@@ -24,7 +26,7 @@ class UserDefinedTags:
         self.header_postfix = config['header_postfix'] if 'header_postfix' in config else ''
         self.end_prefix = config['end_prefix'] if 'end_prefix' in config else ''
 
-        self.begging = config['begging'] if 'begging' in config else ''
+        self.beginning = config['beginning'] if 'beginning' in config else ''
 
         self.sys_start = config['sys_start'] + self.header_postfix
         self.sys_end = self.end_prefix + config['sys_end']
@@ -35,8 +37,15 @@ class UserDefinedTags:
 
         self.has_other = 'other_start' in config and 'other_end' in config
         if self.has_other:
+            self.other_postfix = self.header_postfix
+            self.other_prefix = self.end_prefix
             self.other_start = config['other_start']
-            self.other_end = self.end_prefix + config['other_end']
+            self.other_end = self.other_prefix + config['other_end']
+        else:
+            self.other_start = ''
+            self.other_end = ''
+            self.other_postfix = ':\n'
+            self.other_prefix = ''
 
         debug_print('用户标签配置：', self.__dict__)
 
@@ -82,14 +91,14 @@ class TemplateHelper:
                 end = self.user_tags.model_end
             case _:
                 start = self.user_tags.other_start +\
-                    name + self.user_tags.header_postfix
+                    name + self.user_tags.other_postfix
                 end = self.user_tags.other_end
+
         if not with_start:
             start = ''
         if not with_end:
             end = ''
-        if self.section_idx == 0:
-            start = self.user_tags.begging + start
+
         return start + content + end + ('\n' if new_line else '')
 
     def process_paragraph(self, cur_paragraph: str):
@@ -145,6 +154,7 @@ class TemplateHelper:
 
         if self.continuous_generation:
             new_line = False
+            with_end = False
 
         debug_print('当前section owner:', self.section_owner)
         if len(self.section_owner) > 0:
@@ -160,7 +170,8 @@ class TemplateHelper:
             elif self.user_tags.has_other:
                 section_name = self.section_owner
             else:
-                raise Exception('未知的section owner！')
+                debug_print('未知的section owner！')
+                section_name = self.section_owner
             debug_print('当前section name:', section_name)
             debug_print('no_next_line:', self.no_next_line)
             debug_print('continuous_generation:', self.continuous_generation)
@@ -190,12 +201,19 @@ class TemplateHelper:
 
             # 处理忽略
             if self.user_tags.ignore_following in line:
+                if new_section:
+                    sections.append(
+                        self.process_section(current_section))
+                    current_section = []
+                    self.section_owner = section_owner_new
                 self.no_next_line = True
                 self.continuous_generation = True
                 line = line[:line.find(self.user_tags.ignore_following)]
+                debug_print(line)
                 current_section.append(line)
                 sections.append(
                     self.process_section(current_section))
+                current_section = []
                 break
 
             if new_section:
@@ -208,6 +226,9 @@ class TemplateHelper:
                 self.section_start = True
 
             current_section.append(line)
+
+            if idx == line_count - 1:
+                self.continuous_generation = True
 
         if len(current_section) > 0:
             sections.append(
@@ -232,18 +253,66 @@ class TemplateHelper:
             raise Exception('未找到对应模型的配置文件！')
         self.user_tags.apply_config(config)
 
+    def split_generated_string(self, generated: str):
+        for end_tags in [self.user_tags.sys_end, self.user_tags.user_end,
+                         self.user_tags.model_end, self.user_tags.other_end]:
+            generated = generated.replace(end_tags, '<<<<||mark_here||>>>>')
+
+        parts = generated.split('<<<<||mark_here||>>>>')
+        debug_print('分割后的部分:', parts)
+
+        if len(parts) == 1:
+            return parts[0]
+
+        for idx in range(len(parts)):
+            owner, part = None, parts[idx]
+            part = part.lstrip('\n ').rstrip()
+            if part.startswith(self.user_tags.sys_start):
+                owner = 'sys'
+                part = part[len(self.user_tags.sys_start):].lstrip('\n ')
+            elif part.startswith(self.user_tags.user_start):
+                owner = 'user'
+                part = part[len(self.user_tags.user_start):].lstrip('\n ')
+            elif part.startswith(self.user_tags.model_start):
+                owner = 'model'
+                part = part[len(self.user_tags.model_start):].lstrip('\n ')
+            elif self.user_tags.has_other and part.startswith(self.user_tags.other_start):
+                part = part.split('\n')
+                debug_print('other:', part)
+                owner = part[0][len(self.user_tags.other_start):].lstrip(' ')
+                part = '\n'.join(part[1:]).lstrip('\n ')
+            if owner is not None:
+                debug_print('owner:', owner)
+                parts[idx] = owner + ': ' + part
+
+        parts = '\n'.join(parts)
+        return parts
+
 
 prompt_template_state = TemplateHelper()
 
 
-def llama_prompt_template(prompt, memory):
-    system = ''
-    if memory.startswith('System:'):
-        system, memory = memory[7:].split('|')
-        system = '<|start_header_id|>system<|end_header_id|>\n' + system + '\n<|eot_id|>\n'
-    memory = '<|start_header_id|>memory<|end_header_id|>\n' + memory + '\n<|eot_id|>'
-    prompt = system + prompt
-    return prompt, memory
+def llama_prompt_template(prompt, memory, version: str):
+    prompt_template_state.switch_model('llama', version)
+
+    ignore_following_tag = prompt_template_state.user_tags.ignore_following
+    if ignore_following_tag in prompt:
+        prompt = prompt[:prompt.rfind(
+            ignore_following_tag) + len(ignore_following_tag)]
+
+    if prompt_template_state.user_tags.story_mode in memory:
+        # memory = '<|system|>\n你是专业的故事编写者，请根据用户输入内容续写故事<|end|>\n'
+        # prompt_template_state.story_mode = True
+        debug_print('进入故事模式')
+    else:
+        pass
+    memory = prompt_template_state.make_block(
+        'sys', memory.strip(), new_line=True) + '\n'
+
+    prompt = prompt_template_state.process_prompt(prompt)
+    prompt = prompt_template_state.user_tags.beginning + memory + prompt
+
+    return prompt, ''
 
 
 def phi3_prompt_template(prompt: str, memory: str):
@@ -253,22 +322,19 @@ def phi3_prompt_template(prompt: str, memory: str):
     if ignore_following_tag in prompt:
         prompt = prompt[:prompt.rfind(
             ignore_following_tag) + len(ignore_following_tag)]
-    system = ''
 
     if prompt_template_state.user_tags.story_mode in memory:
-        memory = ''
-        system = '<|system|>system\n以下内容是中篇小说\n<|end|>\n'
-        prompt_template_state.story_mode = True
+        # memory = '<|system|>\n你是专业的故事编写者，请根据用户输入内容续写故事<|end|>\n'
+        # prompt_template_state.story_mode = True
         debug_print('进入故事模式')
     else:
-        if memory.startswith('System:'):
-            system, memory = memory[7:].split('|')
-            system = '<|im_start|>system\n' + system + '\n<|im_end|>\n'
-        memory = '<|im_end|>\n<|im_start|>memory\n' + memory.strip() + ''
+        pass
+    memory = '<|system|>\n' + memory + '<|end|>\n'
 
     prompt = prompt_template_state.process_prompt(prompt)
+    prompt = prompt_template_state.user_tags.beginning + memory + prompt
 
-    return prompt, memory
+    return prompt, ''
 
 
 def qwen_prompt_template(prompt: str, memory: str):
@@ -330,24 +396,79 @@ def qwen_prompt_template(prompt: str, memory: str):
     if prompt_template_state.no_next_line:
         prompt = prompt.strip()
 
+    prompt = prompt_template_state.user_tags.beginning + prompt
+
     return prompt, ''
 
 
+def glm_prompt_template(prompt: str, memory: str, subtype: str):
+    assert subtype in ['yi', 'qwen', 'chatglm', 'yi', 'mistral', "dolphin"]
+    prompt_template_state.switch_model(subtype)
+
+    ignore_following_tag = prompt_template_state.user_tags.ignore_following
+    if ignore_following_tag in prompt:
+        prompt = prompt[:prompt.rfind(
+            ignore_following_tag) + len(ignore_following_tag)]
+        debug_print('改变的prompt: ', prompt)
+
+    system = ''
+    if prompt_template_state.user_tags.story_mode in memory:
+        memory = ''
+        system = prompt_template_state.make_block(
+            'sys', '以下内容是中篇小说', new_line=True)
+        prompt_template_state.story_mode = True
+    else:
+        if memory.startswith('System:'):
+            system, memory = memory[7:].split('|')
+            system = prompt_template_state.make_block(
+                'sys', system, new_line=True)
+        if memory.strip() != '':
+            memory = prompt_template_state.make_block(
+                'memory', memory.strip(), new_line=True)
+
+    prompt = prompt_template_state.process_prompt(prompt)
+    prompt = prompt_template_state.user_tags.beginning + system + '\n' + prompt
+
+    last_pos = prompt.rfind(prompt_template_state.user_tags.other_end)
+    last_pos = last_pos + len(prompt_template_state.user_tags.other_end)
+    if prompt[last_pos] == '\n':
+        if prompt[last_pos + 1] == '\n':
+            last_pos += 2
+        else:
+            last_pos += 1
+    prompt = prompt[:last_pos] + memory + '\n' + prompt[last_pos:]
+
+    return prompt, ''
+
+
+ENABLE_TEMPLATE_PROCESSING = False
+
+
 def prompt_template(prompt, memory):
+    if not ENABLE_TEMPLATE_PROCESSING:
+        print('模板处理已禁用')
+        return prompt, memory
     global prompt_template_state
     prompt_template_state = TemplateHelper()
     print('进入提示词模板生成函数')
-    prompt, memory = phi3_prompt_template(prompt, memory)
+    prompt, memory = glm_prompt_template(prompt, memory, 'qwen')
     print('生成的提示词完毕\n')
     return prompt, memory
 
 
 def out_post_process(outstr: str):
+    if not ENABLE_TEMPLATE_PROCESSING:
+        return outstr
+
     print('\n\n======进入输出后处理函数======')
     print('------输出前------')
     print(outstr)
     print('------输出后------')
-    outstr = '\r' + outstr
+
+    if prompt_template_state.story_mode:
+        outstr = '\r' + outstr
+    outstr = prompt_template_state.split_generated_string(outstr)
+
     print(outstr)
     print('======输出后处理完毕======\n\n')
     return outstr

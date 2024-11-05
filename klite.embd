@@ -4165,6 +4165,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 	const alltalk_stream_endpoint = "/api/tts-generate-streaming";
 	const alltalk_voices_endpoint = "/api/voices";
 	const alltalk_rvc_voices_endpoint = "/api/rvcvoices";
+	const sovits_gen_endpoint = '/tts';
+	const sovits_voices_endpoint = '/list_templates'
 
 	//support for quick news updates
 	const horde_news_endpoint = "https://hordenews.concedo.workers.dev"
@@ -4179,10 +4181,12 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 	const default_a1111_base = "http://localhost:7860";
 	const default_xtts_base = " http://localhost:8020";
 	const default_alltalk_base = "http://localhost:7851";
+	const default_sovits_base = 'http://localhost:9880';
 	const default_comfy_base = "http://localhost:8188";
 
 	const XTTS_ID = 1000;
 	const ALLTALK_ID = 1001;
+	const SOVITS_ID = 1002;
 	const OAI_TTS_ID = 1002;
 	const BIG_HD_RES_PX = 512; //when saving oversized images, could be 640?
 	const HD_RES_PX = 512;
@@ -4317,6 +4321,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		saved_comfy_url: default_comfy_base,
 		saved_xtts_url: default_xtts_base,
 		saved_alltalk_url: default_alltalk_base,
+		saved_sovits_url: default_sovits_base,
 		prev_custom_endpoint_type: 0, //show a reconnect box to custom endpoint if needed. 0 is horde, otherwise its dropdown value+1
 		generate_images_mode: (localflag?0:1), //0=off, 1=horde, 2=a1111, 3=dalle, 4=comfy
 
@@ -5067,6 +5072,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		{
 			fetch_xtts_voices(true,localsettings.speech_synth==XTTS_ID);
 		}
+		if (localsettings.speech_synth == SOVITS_ID)
+			fetch_sovits();
 		if(localsettings.generate_images_mode==2)
 		{
 			connect_to_a1111(true);
@@ -7372,56 +7379,78 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 					};
 
 					document.getElementById("scenariodesc").innerText = "Loading scenario from CharacterHub / Chub...";
-					fetch("https://api.chub.ai/api/characters/download", {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
-					"format": "cai",
-					"fullPath": userinput,
-					"version": "main"
-					}),
-					referrerPolicy: 'no-referrer',
-					})
-					.then(x => {
-						if(x.ok)
-						{
-							return x.json();
-						}else{
-							console.log('Cannot fetch chub scenario: try fallback to tavern image');
-							//cai format failed, try fallback to portrait only
-							get_chubai_portrait(userinput, true, true);
-							return null;
-						}
-					})
-					.then(data => {
-						if(data) //if cai fetch was successful
-						{
-							console.log(data);
-							let botname = data.name?data.name:"Bot";
-							let cdef = data.definition?data.definition.replace("END_OF_DIALOG","").trim():"";
-							let cdesc = data.description?data.description:"";
-							let greeting = data.greeting?data.greeting:"";
-							let previewtxt = (data.title ? data.title + '\n\n' : '') + replaceAll(cdesc,"{{char}}",botname,true);
-							previewtxt = replaceAll(previewtxt,"{{user}}","User",true);
 
-							temp_scenario.title = data.name?data.name:"";
-							temp_scenario.desc = previewtxt;
-							temp_scenario.chatopponent = botname;
-							temp_scenario.prompt = ("\n{{char}}: "+greeting);
-							temp_scenario.memory = cdesc +"\n"+ cdef;
+					if (userinput.startsWith('fromfile')) {
+						// Create a display:none input element to read the file
+						const input = document.createElement('input');
+						input.type = 'file';
+						input.accept = '.json';
+						input.style.display = 'none';
+						input.addEventListener('change', function(e) {
+							const fileReader = new FileReader();
+							let data = null;
+							fileReader.onload = function() {
+								data = fileReader.result;
+								if(data)
+								{
+									let obj = JSON.parse(data);
+									load_temp_scenario_from_tavernobj(obj,true);
+								}
+							};
+							fileReader.readAsText(e.target.files[0]);
+						});
+						input.click();
+					} else {
+						fetch("https://api.chub.ai/api/characters/download", {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify({
+						"format": "cai",
+						"fullPath": userinput,
+						"version": "main"
+						}),
+						referrerPolicy: 'no-referrer',
+						})
+						.then(x => {
+							if(x.ok)
+							{
+								return x.json();
+							}else{
+								console.log('Cannot fetch chub scenario: try fallback to tavern image');
+								//cai format failed, try fallback to portrait only
+								get_chubai_portrait(userinput, true, true);
+								return null;
+							}
+						})
+						.then(data => {
+							if(data) //if cai fetch was successul
+							{
+								console.log(data);
+								let botname = data.name?data.name:"Bot";
+								let cdef = data.definition?data.definition.replace("END_OF_DIALOG","").trim():"";
+								let cdesc = data.description?data.description:"";
+								let greeting = data.greeting?data.greeting:"";
+								let previewtxt = (data.title ? data.title + '\n\n' : '') + replaceAll(cdesc,"{{char}}",botname,true);
+								previewtxt = replaceAll(previewtxt,"{{user}}","User",true);
 
-							let card_is_defective = (data.name==""&&previewtxt==""&&greeting==""&&cdesc==""&&cdef=="");
+								temp_scenario.title = data.name?data.name:"";
+								temp_scenario.desc = previewtxt;
+								temp_scenario.chatopponent = botname;
+								temp_scenario.prompt = ("\n{{char}}: "+greeting);
+								temp_scenario.memory = cdesc +"\n"+ cdef;
 
-							get_chubai_portrait(userinput, card_is_defective, false);
-						}
+								let card_is_defective = (data.name==""&&previewtxt==""&&greeting==""&&cdesc==""&&cdef=="");
 
-					}).catch((error) => {
-						temp_scenario = null;
-						document.getElementById("scenariodesc").innerText = "Error: Selected scenario is invalid.";
-						console.log("Error: " + error);
-					});
+								get_chubai_portrait(userinput, card_is_defective, false);
+							}
+						}).catch((error) => {
+							temp_scenario = null;
+							document.getElementById("scenariodesc").innerText = "Error: Selected scenario is invalid.";
+							console.log("Error: " + error);
+						});
+					}
 				}else{
 					temp_scenario = null;
 					document.getElementById("scenariodesc").innerText = "Error: User input is invalid\n\n Please ensure you have input a valid CharacterHub / ChubAI URL or ID.";
@@ -10362,7 +10391,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		var ttshtml = "<option value=\"0\">Disabled</option>";
 		ttshtml += "<option value=\"1000\">XTTS API Server</option>";
 		ttshtml += "<option value=\"1001\">AllTalk API Server</option>";
-		ttshtml += "<option value=\"1002\">OpenAI-Compat. API Server</option>";
+		ttshtml += "<option value=\"1002\">So-ViTs API Server</option>";
+		ttshtml += "<option value=\"1003\">OpenAI-Compat. API Server</option>";
 		if ('speechSynthesis' in window) {
 			let voices = window.speechSynthesis.getVoices();
 			console.log("speech synth available: " + voices.length);
@@ -11322,6 +11352,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 	function restart_new_game(save = true, keep_memory = false) {
 		xtts_is_playing = false;
+		sovits_is_playing = false;
 		idle_timer = 0;
 		gametext_arr = [];
 		redo_arr = [];
@@ -11881,6 +11912,8 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 	var xtts_is_connected = false;
 	var xtts_is_playing = false;
+	var sovits_is_connected = false;
+	var sovits_is_playing = false;
 	function fetch_xtts_voices(silent, is_xtts)
 	{
 		if(!xtts_is_connected)
@@ -11938,6 +11971,36 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		}
 	}
 
+	function fetch_sovits_voices()
+	{
+		if (!sovits_is_connected)
+		{
+			let endpt = localsettings.saved_sovits_url + sovits_voices_endpoint;
+			fetch(endpt, {
+				method: 'POST'
+			})
+			.then(x => x.json())
+			.then(data => {
+				console.log(data);
+				voice_list = data['aud_files']
+				//repopulate our voices list
+				let dropdown = document.getElementById("xtts_voices");
+				let selectionhtml = ``;
+				for (var i = 0; i < voice_list.length; ++i) {
+					// Check for XTTS voices if set
+					let sel = (localsettings.xtts_voice!=""&&localsettings.xtts_voice==data[i]);
+					selectionhtml += `<option value="` + voice_list[i] + `"`+(sel?" selected":"")+`>`+voice_list[i]+`</option>`;
+				}
+				dropdown.innerHTML = selectionhtml;
+				sovits_is_connected = true;
+			}).catch(error => {
+				sovits_is_connected = false;
+				msgbox("So-ViTs Connect Error: " + error+"\nCheck So-ViTs API Server endpoint URL.\n");
+				return;
+			});
+		}
+	}
+
 	function test_tts()
 	{
 		inputBox("Enter phrase to speak.","Test TTS","","Input text to speak", ()=>{
@@ -11968,8 +12031,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 			}
 			fetch_xtts_voices(true, selectedTTS == XTTS_ID);
 		}
-		else if(selectedTTS == OAI_TTS_ID) {
-			document.getElementById("oai_tts_container").classList.remove("hidden");
+		else if (selectedTTS == SOVITS_ID)
+		{
+			document.getElementById("xtts_container").classList.remove("hidden");
+			fetch_sovits_voices();
+		}
+		else if (selectedTTS==OAI_TTS_ID)
+		{	document.getElementById("oai_tts_container").classList.remove("hidden");
 		}
 	}
 
@@ -12015,9 +12083,26 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 	// Update set_xtts_url to use the new fetch_rvc_voices function
 	function set_xtts_url() {
-		let is_xtts = (document.getElementById("ttsselect").value==XTTS_ID);
-		let epname = (is_xtts?"XTTS":"AllTalk");
-		inputBox("Enter "+epname+" API Server URL.",epname+" API Server URL",(is_xtts?localsettings.saved_xtts_url:localsettings.saved_alltalk_url),"Input "+epname+" API Server URL", ()=>{
+		let epname = '';
+		var default_url = '';
+		var tts_id = document.getElementById("ttsselect").value;
+		if (tts_id==XTTS_ID)
+		{
+			epname = "XTTS";
+			default_url = localsettings.saved_xtts_url;
+		}
+		else if (tts_id == ALLTALK_ID)
+		{
+			epname = "AllTalk";
+			default_url = localsettings.saved_alltalk_url;
+		}
+		else
+		{
+			epname = 'So-ViTs';
+			default_url = localsettings.saved_sovits_url;
+		}
+		inputBox("Enter "+epname+" API Server URL.",epname+" API Server URL",
+					default_url,"Input "+epname+" API Server URL", ()=>{
 			let userinput = getInputBoxValue();
 			userinput = userinput.trim();
 			if(userinput!="" && userinput.slice(-1)=="/") {
@@ -12027,15 +12112,22 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 				userinput = (is_xtts?default_xtts_base:default_alltalk_base);
 			}
 			if (userinput != null && userinput!="") {
-				xtts_is_connected = false;
-				if(is_xtts) {
-					localsettings.saved_xtts_url = userinput.trim();
-				} else {
-					localsettings.saved_alltalk_url = userinput.trim();
-					// Fetch RVC voices with new URL
-					fetch_rvc_voices();
+				if (document.getElementById("ttsselect").value == SOVITS_ID)
+				{
+					localsettings.saved_sovits_url = userinput.trim();
 				}
-				fetch_xtts_voices(false, is_xtts);
+				else
+				{
+					xtts_is_connected = false;
+					if(is_xtts) {
+						localsettings.saved_xtts_url = userinput.trim();
+					} else {
+						localsettings.saved_alltalk_url = userinput.trim();
+						// Fetch RVC voices with new URL
+						fetch_rvc_voices();
+					}
+					fetch_xtts_voices(false, is_xtts);
+				}
 			}
 		},false);
 	}
@@ -12284,6 +12376,75 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 						});
 					}
 				}
+			}
+		}
+		else if (ssval == SOVITS_ID)
+		{
+			if (sovits_is_connected)
+			{
+				const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+				let sovits_payload =
+				{
+					// str.(required) text to be synthesized
+					"text": text,
+
+					// str.(required) language of the text to be synthesized
+					"text_lang": document.getElementById("xtts_lang").value.trim().toLowerCase(),
+
+					// str.(required) reference audio path
+					"ref_audio_path": document.getElementById("xtts_voices").value.trim(),
+
+					// list.(optional) auxiliary reference audio paths for multi-speaker synthesis
+					"aux_ref_audio_paths": [],
+
+					"prompt_text": "",          // str.(optional) prompt text for the reference audio
+					"prompt_lang": "zh",          // str.(required) language of the prompt text for the reference audio
+					"top_k": 5,                   // int. top k sampling
+					"top_p": 1,                   // float. top p sampling
+					"temperature": 1,             // float. temperature for sampling
+					"text_split_method": "cut0",  // str. text split method, see text_segmentation_method.py for details.
+					"batch_size": 8,              // int. batch size for inference
+					"batch_threshold": 0.75,      // float. threshold for batch splitting.
+					"split_bucket": true,         // bool. whether to split the batch into multiple buckets.
+					"return_fragment": false,     // bool. step by step return the audio fragment.
+					"speed_factor":1.0,           // float. control the speed of the synthesized audio.
+					"streaming_mode": false,      // bool. whether to return a streaming response.
+					"seed": -1,                   // int. random seed for reproducibility.
+					"parallel_infer": true,       // bool. whether to use parallel inference.
+					"repetition_penalty": 1.35    // float. repetition penalty for T2S model.
+				};
+				fetch(localsettings.saved_sovits_url + sovits_gen_endpoint, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify(sovits_payload),
+				})
+				.then(response => {
+					if (!response.ok)
+						throw new Error(`Server error: ${response.json().message || 'No message provided'} (Status: ${response.status})`);
+					return response.arrayBuffer()
+				})
+				.then(data => {
+					return audioContext.decodeAudioData(data);
+				})
+				.then(decodedData => {
+					const playSound = audioContext.createBufferSource();
+					playSound.buffer = decodedData;
+					playSound.connect(audioContext.destination);
+					sovits_is_playing = true;
+					update_submit_button(false);
+					playSound.start(audioContext.currentTime);
+					playSound.onended = function() {
+						setTimeout(() => {
+							sovits_is_playing = false;
+							update_submit_button(false);
+							console.log("Audio finished playing");
+						},300);
+					};
+				}).catch((error) => {
+					console.log("So-ViTs Speak Error: " + error);
+				});
 			}
 		}
 		else
@@ -15037,7 +15198,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		return (voice_typing_mode>0 && is_using_kcpp_with_whisper()
 			&& !document.getElementById("btnsend").disabled
 			&& !voice_is_processing && !voice_is_recording && isVoiceInputConfigured
-			&& !currentlySpeaking && !xtts_is_playing && !is_popup_open());
+			&& !currentlySpeaking && !xtts_is_playing && !sovits_is_playing && !is_popup_open());
 	}
 
 	// AUDIO MANIPULATION FUNCTIONS
