@@ -451,7 +451,7 @@ def prompt_template(prompt, memory):
     global prompt_template_state
     prompt_template_state = TemplateHelper()
     print('进入提示词模板生成函数')
-    prompt, memory = glm_prompt_template(prompt, memory, 'qwen')
+    prompt, memory = glm_prompt_template(prompt, memory, 'dolphin')
     print('生成的提示词完毕\n')
     return prompt, memory
 

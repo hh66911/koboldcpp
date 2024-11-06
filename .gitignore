@@ -143,3 +143,5 @@ conda/
 *.txt
 
 *.ipynb
+
+*.dll
