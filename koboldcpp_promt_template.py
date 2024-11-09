@@ -13,8 +13,10 @@ class UserDefinedTags:
         self.story_mode = '<StoryMode>'
         self.comment_start = '<Comment>'
         self.comment_end = '</Comment>'
+        self.memory_splitter = '-|-|-'
 
-        self.alias_tag = re.compile(r'<Alias:(\w+)-(\w+)>')
+        self.alias_tag = re.compile(r'<Alias:([\w\s]+)-([\w\s]+)>')
+        self.pseudo_tag = re.compile(r'<Pseudo:([\w\s,]+)-([\w\s]+)>')
 
         self.reserved_owners = [
             'sys', 'user', 'model'
@@ -28,24 +30,23 @@ class UserDefinedTags:
 
         self.beginning = config['beginning'] if 'beginning' in config else ''
 
-        self.sys_start = config['sys_start'] + self.header_postfix
+        post_fix_disable = [] if 'disable_postfix' not in config else config['disable_postfix']
+        self.sys_start = config['sys_start'] + (self.header_postfix if 'sys' not in post_fix_disable else '')
         self.sys_end = self.end_prefix + config['sys_end']
-        self.user_start = config['user_start'] + self.header_postfix
+        self.user_start = config['user_start'] + (self.header_postfix if 'user' not in post_fix_disable else '')
         self.user_end = self.end_prefix + config['user_end']
-        self.model_start = config['model_start'] + self.header_postfix
+        self.model_start = config['model_start'] + (self.header_postfix if 'model' not in post_fix_disable else '')
         self.model_end = self.end_prefix + config['model_end']
 
         self.has_other = 'other_start' in config and 'other_end' in config
         if self.has_other:
-            self.other_postfix = self.header_postfix
-            self.other_prefix = self.end_prefix
             self.other_start = config['other_start']
-            self.other_end = self.other_prefix + config['other_end']
+            self.other_postfix = self.header_postfix if 'other' not in post_fix_disable else ''
+            self.other_end = config['other_end']
         else:
             self.other_start = ''
-            self.other_end = ''
             self.other_postfix = ':\n'
-            self.other_prefix = ''
+            self.other_end = ''
 
         debug_print('用户标签配置：', self.__dict__)
 
@@ -75,6 +76,8 @@ class TemplateHelper:
         self.user_alias = None
         self.model_alias = None
         self.sys_alias = None
+        
+        self.pseudo_tags = dict()
 
     def make_block(self, name: str, content: str,
                    with_start=True, with_end=True,
@@ -113,8 +116,19 @@ class TemplateHelper:
                 self.sys_alias = alias[1]
             elif alias[0] == 'model':
                 self.model_alias = alias[1]
-        paragraph = cleaned_text + '\n'
-        return paragraph
+        paragraph = cleaned_text
+        
+        pseudo_tag = self.user_tags.pseudo_tag
+        pseudo_values = pseudo_tag.findall(paragraph)
+        cleaned_text = pseudo_tag.sub(lambda _: "", paragraph)
+        for pseudo in pseudo_values:
+            debug_print('伪装:', pseudo)
+            pseudo_chars: list[str] = pseudo[0].split(',')
+            for c in pseudo_chars:
+                self.pseudo_tags[c.strip()] = pseudo[1]
+        paragraph = cleaned_text
+            
+        return paragraph + '\n'
 
     def process_section(self, cur_section: list[str]):
         section = ''
@@ -175,6 +189,9 @@ class TemplateHelper:
             debug_print('当前section name:', section_name)
             debug_print('no_next_line:', self.no_next_line)
             debug_print('continuous_generation:', self.continuous_generation)
+            if section_name in self.pseudo_tags:
+                section = section_name + ': ' + section
+                section_name = self.pseudo_tags[section_name]
             section = self.make_block(section_name, section,
                                       with_start, with_end,
                                       new_line)
@@ -401,9 +418,10 @@ def qwen_prompt_template(prompt: str, memory: str):
     return prompt, ''
 
 
-def glm_prompt_template(prompt: str, memory: str, subtype: str):
-    assert subtype in ['yi', 'qwen', 'chatglm', 'yi', 'mistral', "dolphin"]
-    prompt_template_state.switch_model(subtype)
+def normal_prompt_template(prompt: str, memory: str,
+                           subtype: str, subversion = None):
+    # assert subtype in ['yi', 'qwen', 'chatglm', 'yi', 'mistral', "dolphin"]
+    prompt_template_state.switch_model(subtype, subversion)
 
     ignore_following_tag = prompt_template_state.user_tags.ignore_following
     if ignore_following_tag in prompt:
@@ -419,7 +437,7 @@ def glm_prompt_template(prompt: str, memory: str, subtype: str):
         prompt_template_state.story_mode = True
     else:
         if memory.startswith('System:'):
-            system, memory = memory[7:].split('|')
+            system, memory = memory[7:].split(prompt_template_state.user_tags.memory_splitter)
             system = prompt_template_state.make_block(
                 'sys', system, new_line=True)
         if memory.strip() != '':
@@ -436,12 +454,12 @@ def glm_prompt_template(prompt: str, memory: str, subtype: str):
             last_pos += 2
         else:
             last_pos += 1
-    prompt = prompt[:last_pos] + memory + '\n' + prompt[last_pos:]
+    prompt = prompt[:last_pos] + (memory + '\n' if memory.strip() != '' else '') + prompt[last_pos:]
 
     return prompt, ''
 
 
-ENABLE_TEMPLATE_PROCESSING = False
+ENABLE_TEMPLATE_PROCESSING = True
 
 
 def prompt_template(prompt, memory):
@@ -451,7 +469,7 @@ def prompt_template(prompt, memory):
     global prompt_template_state
     prompt_template_state = TemplateHelper()
     print('进入提示词模板生成函数')
-    prompt, memory = glm_prompt_template(prompt, memory, 'dolphin')
+    prompt, memory = normal_prompt_template(prompt, memory, 'llama', 'nsfw')
     print('生成的提示词完毕\n')
     return prompt, memory
 

@@ -1106,7 +1106,7 @@ def generate(genparams, is_quiet=False, stream_flag=False):
                 if sindex != -1 and trim_str!="":
                     outstr = outstr[:sindex]
         outstr = koboldcpp_promt_template.out_post_process(outstr)
-        return {"text":outstr,"status":ret.status,"stopreason":ret.stopreason}
+        return {"text":outstr,"status":ret.status,"stopreason":ret.stopreason,"prompt_tokens":ret.prompt_tokens, "completion_tokens": ret.completion_tokens}
 
 
 def sd_load_model(model_filename,vae_filename,lora_filename,t5xxl_filename,clipl_filename,clipg_filename):
