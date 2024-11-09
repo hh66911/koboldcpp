@@ -60,7 +60,7 @@ class TemplateHelper:
         self.user_tags = UserDefinedTags()
 
         import json
-        with open(r"D:\GGUF.CPP\tkn_configs.json", 'r', encoding='utf-8') as f:
+        with open(r"D:/GGUF.CPP/koboldcpp/tkn_configs.json", 'r', encoding='utf-8') as f:
             self.config_file = json.load(f)
 
         self.switch_model('llama')
