@@ -21,6 +21,17 @@ class UserDefinedTags:
         self.reserved_owners = [
             'sys', 'user', 'model'
         ]
+        self.local_alias_tags = {
+            '<Alias/sys>': 'sys',
+            '<Alias/user>': 'user',
+            '<Alias/model>': 'model'
+        }
+        self.local_pseudo_tags = {
+            '<Pseudo/sys>': 'sys',
+            '<Pseudo/user>': 'user',
+            '<Pseudo/model>': 'model',
+            '<Pseudo/>': ''
+        }
 
         self.has_other = False
 
@@ -52,18 +63,30 @@ class UserDefinedTags:
 
 
 class TemplateHelper:
-    def __init__(self) -> None:
+    def __init__(self, model = None, version = None) -> None:
         self.continuous_generation = False
         self.no_next_line = False
         self.story_mode = False
 
         self.user_tags = UserDefinedTags()
+        
+        self.current_config: dict|None = None
+        self.available_configs = []
+        self.lock_config = False
 
         import json
-        with open(r"D:/GGUF.CPP/koboldcpp/tkn_configs.json", 'r', encoding='utf-8') as f:
+        with open("./tkn_configs.json", 'r', encoding='utf-8') as f:
             self.config_file = json.load(f)
+            
+        for c in self.config_file:
+            self.available_configs.append(
+                (c['model'], c['version'] if 'version' in c else '')
+                )
 
-        self.switch_model('llama')
+        if model is None:
+            self.switch_model('llama')
+        else:
+            self.switch_model(model, version)
 
         self.comment_on = False
         self.section_start = False
@@ -77,7 +100,19 @@ class TemplateHelper:
         self.model_alias = None
         self.sys_alias = None
         
+        self.local_alias = None
+        self.local_pseudo = None
+        
         self.pseudo_tags = dict()
+        
+    def reset_local_states(self):
+        self.local_alias = None
+        self.local_pseudo = None
+        
+    def reset_all_states(self):
+        last_config: dict = self.current_config
+        self = TemplateHelper(last_config['model'], last_config['version'])
+        
 
     def make_block(self, name: str, content: str,
                    with_start=True, with_end=True,
@@ -144,9 +179,19 @@ class TemplateHelper:
                     self.user_tags.comment_end) + len(self.user_tags.comment_end):]
             if self.comment_on:
                 continue
+                    
             if self.user_tags.comment_start in line:
                 self.comment_on = True
                 line = line[:line.find(self.user_tags.comment_start)]
+            
+            for tag, value in self.user_tags.local_alias_tags.items():
+                if tag in line:
+                    self.local_alias = value
+                    line = line.replace(tag, '')
+            for tag, value in self.user_tags.local_pseudo_tags.items():
+                if tag in line:
+                    self.local_pseudo = value
+                    line = line.replace(tag, '')
 
             section += self.process_paragraph(line)
 
@@ -186,16 +231,27 @@ class TemplateHelper:
             else:
                 debug_print('未知的section owner！')
                 section_name = self.section_owner
+                
+            if self.local_pseudo is not None:
+                section = self.section_owner + ': ' + section
+                if self.local_pseudo != '':
+                    section_name = self.local_pseudo
+            elif self.section_owner in self.pseudo_tags:
+                section = self.section_owner + ': ' + section
+                section_name = self.pseudo_tags[self.section_owner]
+                
+            if self.local_alias is not None:
+                section_name = self.local_alias
+                
             debug_print('当前section name:', section_name)
             debug_print('no_next_line:', self.no_next_line)
             debug_print('continuous_generation:', self.continuous_generation)
-            if section_name in self.pseudo_tags:
-                section = section_name + ': ' + section
-                section_name = self.pseudo_tags[section_name]
             section = self.make_block(section_name, section,
                                       with_start, with_end,
                                       new_line)
+            
             debug_print('当前section:', section)
+            self.reset_local_states()
 
         return section
 
@@ -221,6 +277,7 @@ class TemplateHelper:
                 if new_section:
                     sections.append(
                         self.process_section(current_section))
+                    self.section_idx += 1
                     current_section = []
                     self.section_owner = section_owner_new
                 self.no_next_line = True
@@ -234,6 +291,7 @@ class TemplateHelper:
                 break
 
             if new_section:
+                # 第一个 section
                 if self.section_start:
                     sections.append(
                         self.process_section(current_section))
@@ -259,6 +317,8 @@ class TemplateHelper:
         return sections
 
     def switch_model(self, model_name: str, model_version: str | None = None):
+        if self.lock_config:
+            raise Exception('配置文件被锁定！')
         configs = list(
             filter(lambda x: x['model'] == model_name, self.config_file))
         if model_version is not None:
@@ -268,6 +328,7 @@ class TemplateHelper:
             config = configs[0]
         if len(config) == 0:
             raise Exception('未找到对应模型的配置文件！')
+        self.current_config = config
         self.user_tags.apply_config(config)
 
     def split_generated_string(self, generated: str):
@@ -419,9 +480,10 @@ def qwen_prompt_template(prompt: str, memory: str):
 
 
 def normal_prompt_template(prompt: str, memory: str,
-                           subtype: str, subversion = None):
+                           subtype = None, subversion = None):
     # assert subtype in ['yi', 'qwen', 'chatglm', 'yi', 'mistral', "dolphin"]
-    prompt_template_state.switch_model(subtype, subversion)
+    if subtype is not None:
+        prompt_template_state.switch_model(subtype, subversion)
 
     ignore_following_tag = prompt_template_state.user_tags.ignore_following
     if ignore_following_tag in prompt:
@@ -467,10 +529,12 @@ def prompt_template(prompt, memory):
         print('模板处理已禁用')
         return prompt, memory
     global prompt_template_state
-    prompt_template_state = TemplateHelper()
+    prompt_template_state.reset_all_states()
+    prompt_template_state.lock_config = True
     print('进入提示词模板生成函数')
-    prompt, memory = normal_prompt_template(prompt, memory, 'llama', 'nsfw')
+    prompt, memory = normal_prompt_template(prompt, memory)
     print('生成的提示词完毕\n')
+    prompt_template_state.lock_config = False
     return prompt, memory
 
 

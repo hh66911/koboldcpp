@@ -4186,7 +4186,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 	const XTTS_ID = 1000;
 	const ALLTALK_ID = 1001;
-	const SOVITS_ID = 1002;
+	const SOVITS_ID = 1010;
 	const OAI_TTS_ID = 1002;
 	const BIG_HD_RES_PX = 512; //when saving oversized images, could be 640?
 	const HD_RES_PX = 512;
@@ -4351,6 +4351,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		persist_session: true,
 		speech_synth: 0, //0 is disabled, 1000 is xtts
 		xtts_voice: "female_calm",
+		xtts_language: "ZH",
 		beep_on: false,
 		notify_on: false,
 		narrate_both_sides: false,
@@ -4428,6 +4429,9 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		xtc_threshold: 0.2,
 		xtc_probability: 0.0,
 		sampler_order: [6, 0, 1, 3, 4, 2, 5],
+
+		chattemplate_enabled: true,
+		selected_template: [null, null],
 	};
 
 	var defaultsettings = JSON.parse(JSON.stringify(localsettings));
@@ -4880,6 +4884,31 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 			});
 		}
 
+		if (localsettings.chattemplate_enabled)
+		{
+			fetch('/available_templates', {
+				method: 'GET'
+			}).then(
+				x => x.json()
+			).then(data => {
+				data = data['result'];
+				all_chat_templates = data;
+				let selidx = -1;
+				let local_last = localsettings.selected_template;
+				for (let idx in data) {
+					if (data[idx][0] == local_last[0] &&
+						data[idx][1] == local_last[1]) {
+						selidx = idx;
+					}
+				}
+				if (selidx == -1) {
+					localsettings.selected_template = [null, null];
+					localsettings.chattemplate_enabled = false;
+				}
+				toggle_enable_template();
+			});
+		}
+
 		//setup drag and drop zone for files
 		setupDragDrop();
 
@@ -5073,7 +5102,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 			fetch_xtts_voices(true,localsettings.speech_synth==XTTS_ID);
 		}
 		if (localsettings.speech_synth == SOVITS_ID)
-			fetch_sovits();
+			fetch_sovits_voices();
 		if(localsettings.generate_images_mode==2)
 		{
 			connect_to_a1111(true);
@@ -10391,7 +10420,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		var ttshtml = "<option value=\"0\">Disabled</option>";
 		ttshtml += "<option value=\"1000\">XTTS API Server</option>";
 		ttshtml += "<option value=\"1001\">AllTalk API Server</option>";
-		ttshtml += "<option value=\"1002\">So-ViTs API Server</option>";
+		ttshtml += "<option value=\"1010\">So-ViTs API Server</option>";
 		ttshtml += "<option value=\"1003\">OpenAI-Compat. API Server</option>";
 		if ('speechSynthesis' in window) {
 			let voices = window.speechSynthesis.getVoices();
@@ -10404,6 +10433,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		}
 		document.getElementById("ttsselect").innerHTML = ttshtml;
 		document.getElementById("ttsselect").value = localsettings.speech_synth;
+		document.getElementById("xtts_lang").value = localsettings.xtts_language;
 		toggle_tts_mode();
 		document.getElementById("beep_on").checked = localsettings.beep_on;
 		document.getElementById("notify_on").checked = localsettings.notify_on;
@@ -10414,6 +10444,27 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		document.getElementById("voice_end_delay").value = localsettings.voice_end_delay;
 		document.getElementById("voice_suppress_nonspeech").checked = localsettings.voice_suppress_nonspeech;
 		toggle_opmode();
+
+		// chat template settings display
+		document.getElementById('enable_template').checked = localsettings.chattemplate_enabled;
+		chattemplatehtml = '';
+		{
+			let selidx = -1;
+			let local_last = localsettings.selected_template;
+			for (let idx in all_chat_templates) {
+				chattemplatehtml += '<option value="' + idx + '">' +
+					all_chat_templates[idx][0] + ': ' +
+					all_chat_templates[idx][1] + '</option>';
+				if (all_chat_templates[idx][0] == local_last[0] &&
+					all_chat_templates[idx][1] == local_last[1]) {
+					selidx = idx;
+				}
+			}
+			document.getElementById('chat_template').innerHTML = chattemplatehtml;
+			if (selidx != -1) {
+				document.getElementById('chat_template').value = selidx;
+			}
+		}
 
 		//sd models display
 		update_horde_sdmodels();
@@ -10700,8 +10751,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		localsettings.xtc_probability = document.getElementById("xtc_probability").value;
 		localsettings.token_count_multiplier = document.getElementById("token_count_multiplier").value;
 
+		localsettings.chattemplate_enabled = document.getElementById('enable_template').checked;
+		localsettings.selected_template = all_chat_templates[document.getElementById('chat_template').value];
+		toggle_enable_template();
+
 		localsettings.speech_synth = document.getElementById("ttsselect").value;
 		localsettings.xtts_voice = document.getElementById("xtts_voices").value;
+		localsettings.xtts_language = document.getElementById("xtts_lang").value;
 		localsettings.beep_on = (document.getElementById("beep_on").checked?true:false);
 		localsettings.notify_on = (document.getElementById("notify_on").checked?true:false);
 		no_escape_html = (document.getElementById("no_escape_html").checked?true:false);
@@ -11040,6 +11096,55 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		toggle_uistyle();
 	}
 
+	var all_chat_templates = [];
+	function toggle_chattemplate() {
+		let selected_template = localsettings.selected_template;
+		fetch('/api/change_template', {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				model: selected_template[0],
+				version: selected_template[1]
+			})
+		}).then(
+			x => x.json()
+		).then(
+			data => {
+				if (!data['succeed']) {
+					alert('Failed to select current chat template');
+				}
+			}
+		)
+	}
+
+	function toggle_enable_template() {
+		let enabled = localsettings.chattemplate_enabled;
+		if (enabled) {
+			toggle_chattemplate();
+		} else {
+			fetch('/api/change_template', {
+				method: "POST",
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					model: null,
+					version: null
+				})
+			}).then(
+				x => x.json()
+			).then(
+				data => {
+					if (!data['succeed']) {
+						alert('Failed to select current chat template');
+					}
+				}
+			)
+		}
+	}
+
 	//triggers if advanced load is enabled
 	var advload_callback = null;
 	function handle_advload_popup(need_display,callbackfn)
@@ -11352,7 +11457,6 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 	function restart_new_game(save = true, keep_memory = false) {
 		xtts_is_playing = false;
-		sovits_is_playing = false;
 		idle_timer = 0;
 		gametext_arr = [];
 		redo_arr = [];
@@ -11913,7 +12017,6 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 	var xtts_is_connected = false;
 	var xtts_is_playing = false;
 	var sovits_is_connected = false;
-	var sovits_is_playing = false;
 	function fetch_xtts_voices(silent, is_xtts)
 	{
 		if(!xtts_is_connected)
@@ -12013,6 +12116,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		},false);
 	}
 
+	var tts_current_speaking = null;
 	function toggle_tts_mode()
 	{
 		document.getElementById("xtts_container").classList.add("hidden");
@@ -12034,6 +12138,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		else if (selectedTTS == SOVITS_ID)
 		{
 			document.getElementById("xtts_container").classList.remove("hidden");
+			localsettings.xtts_language = document.getElementById("xtts_lang").value;
 			fetch_sovits_voices();
 		}
 		else if (selectedTTS==OAI_TTS_ID)
@@ -12195,6 +12300,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 					return audioContext.decodeAudioData(data);
 				})
 				.then(decodedData => {
+					if (xtts_is_playing)
+					{
+						if(tts_current_speaking)
+							tts_current_speaking.stop();
+						xtts_is_playing = false;
+					}
+
 					const playSound = audioContext.createBufferSource();
 					playSound.buffer = decodedData;
 					playSound.connect(audioContext.destination);
@@ -12208,6 +12320,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 							console.log("Audio finished playing");
 						},300);
 					};
+					tts_current_speaking = playSound;
 				}).catch((error) => {
 					console.log("XTTS Speak Error: " + error);
 				});
@@ -12233,6 +12346,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 						return audioContext.decodeAudioData(data);
 					})
 					.then(decodedData => {
+						if (xtts_is_playing)
+						{
+							if(tts_current_speaking)
+								tts_current_speaking.stop();
+							xtts_is_playing = false;
+						}
+
 						const playSound = audioContext.createBufferSource();
 						playSound.buffer = decodedData;
 						playSound.connect(audioContext.destination);
@@ -12246,6 +12366,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 								console.log("Audio finished playing");
 							},300);
 						};
+						tts_current_speaking = playSound;
 					}).catch((error) => {
 						xtts_is_playing = false;
 						update_submit_button(false);
@@ -12259,6 +12380,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 
 					let playDecodedAllTalkData = function(decodedData)
 					{
+						if (xtts_is_playing)
+						{
+							if(tts_current_speaking)
+								tts_current_speaking.stop();
+							xtts_is_playing = false;
+						}
+
 						const playSound = audioContext.createBufferSource();
 						playSound.buffer = decodedData;
 						playSound.connect(audioContext.destination);
@@ -12272,6 +12400,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 								console.log("Audio finished playing");
 							},300);
 						};
+						tts_current_speaking = playSound;
 					}
 
 					if (isStreaming) {
@@ -12380,6 +12509,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		}
 		else if (ssval == SOVITS_ID)
 		{
+			if (xtts_is_playing)
+			{
+				if(tts_current_speaking)
+					tts_current_speaking.stop();
+				xtts_is_playing = false;
+			}
+
 			if (sovits_is_connected)
 			{
 				const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -12389,10 +12525,10 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 					"text": text,
 
 					// str.(required) language of the text to be synthesized
-					"text_lang": document.getElementById("xtts_lang").value.trim().toLowerCase(),
+					"text_lang": localsettings.xtts_language.toLowerCase(),
 
 					// str.(required) reference audio path
-					"ref_audio_path": document.getElementById("xtts_voices").value.trim(),
+					"ref_audio_path": localsettings.xtts_voice.trim(),
 
 					// list.(optional) auxiliary reference audio paths for multi-speaker synthesis
 					"aux_ref_audio_paths": [],
@@ -12429,19 +12565,27 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 					return audioContext.decodeAudioData(data);
 				})
 				.then(decodedData => {
+					if (xtts_is_playing)
+					{
+						if(tts_current_speaking)
+							tts_current_speaking.stop();
+						xtts_is_playing = false;
+					}
+
 					const playSound = audioContext.createBufferSource();
 					playSound.buffer = decodedData;
 					playSound.connect(audioContext.destination);
-					sovits_is_playing = true;
+					xtts_is_playing = true;
 					update_submit_button(false);
 					playSound.start(audioContext.currentTime);
 					playSound.onended = function() {
 						setTimeout(() => {
-							sovits_is_playing = false;
+							xtts_is_playing = false;
 							update_submit_button(false);
 							console.log("Audio finished playing");
 						},300);
 					};
+					tts_current_speaking = playSound;
 				}).catch((error) => {
 					console.log("So-ViTs Speak Error: " + error);
 				});
@@ -12449,6 +12593,13 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		}
 		else
 		{
+			if (xtts_is_playing)
+			{
+				if(tts_current_speaking)
+					tts_current_speaking.stop();
+				xtts_is_playing = false;
+			}
+
 			if ('speechSynthesis' in window) {
 				let utterance = new window.SpeechSynthesisUtterance(text);
 				utterance.voice = window.speechSynthesis.getVoices()[ssval - 1];
@@ -15198,7 +15349,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		return (voice_typing_mode>0 && is_using_kcpp_with_whisper()
 			&& !document.getElementById("btnsend").disabled
 			&& !voice_is_processing && !voice_is_recording && isVoiceInputConfigured
-			&& !currentlySpeaking && !xtts_is_playing && !sovits_is_playing && !is_popup_open());
+			&& !currentlySpeaking && !xtts_is_playing && !is_popup_open());
 	}
 
 	// AUDIO MANIPULATION FUNCTIONS
@@ -20285,6 +20436,24 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 							<button title="Set Background Image" type="button" class="btn btn-primary bg_green" style="padding:2px 2px;margin:0px 0px 0px auto;font-size:10px;" onclick="load_bgimg_button()">Set</button>
 							<button title="Remove Background Image" type="button" class="btn btn-primary bg_red" style="padding:2px 2px;margin:0px 0px 0px 1px;font-size:10px;" onclick="clear_bg_img()">Clear</button>
 						</div>
+					</div>
+
+					<div class="settingitem wide" style="margin-top: 4px;">
+						<div class="settinglabel">
+							<div class="justifyleft settingsmall">Enable Chat Template<span class="helpicon">?<span
+								class="helptext">Is Chat template being enabled</span></span></div>
+							<input title="Enable Chat Template" type="checkbox" id="enable_template"
+								style="margin:0px 0px 0px auto;">
+						</div>
+						<div class="settinglabel">
+							<div class="justifyleft settingsmall">Change Chat Template<span
+								class="helpicon">?<span class="helptext">
+									Change the internal chat template wrapping your chat content
+							</span></span></div>
+						</div>
+						<select title="Change Chat Template" class="form-control" id="chat_template"
+							style="height:20px;padding:0;margin:0px 0 0;">
+						</select>
 					</div>
 
 					<div class="settingitem wide">

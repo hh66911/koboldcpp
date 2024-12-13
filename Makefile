@@ -157,18 +157,18 @@ ifeq ($(UNAME_M),$(filter $(UNAME_M),x86_64 i686 amd64))
 		endif
 	else
 # if not on windows, they are clearly building it themselves, so lets just use whatever is supported
-		ifdef LLAMA_PORTABLE
-		CFLAGS +=
-		NONECFLAGS +=
-		SIMPLECFLAGS += -mavx -msse3
-		ifdef LLAMA_NOAVX2
-			FULLCFLAGS += -msse3 -mavx
-		else
-			FULLCFLAGS += -mavx2 -msse3 -mfma -mf16c -mavx
-		endif
-		else
-		CFLAGS += -march=native -mtune=native
-		endif
+# ifdef LLAMA_PORTABLE
+# CFLAGS +=
+# NONECFLAGS +=
+# SIMPLECFLAGS += -mavx -msse3
+# ifdef LLAMA_NOAVX2
+# 	FULLCFLAGS += -msse3 -mavx
+# else
+# 	FULLCFLAGS += -mavx2 -msse3 -mfma -mf16c -mavx
+# endif
+# else
+# CFLAGS += -march=native -mtune=native
+# endif
 	endif
 endif
 
@@ -206,15 +206,19 @@ endif
 ifdef CUDA_DOCKER_ARCH
 	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=$(CUDA_DOCKER_ARCH)
 else
-ifdef LLAMA_PORTABLE
-ifdef LLAMA_COLAB #colab does not need all targets, all-major doesnt work correctly with pascal
-	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all-major
-else
-	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all
-endif #LLAMA_COLAB
-else
-	NVCCFLAGS += -arch=native
-endif #LLAMA_PORTABLE
+	ifdef LLAMA_PORTABLE
+		ifdef LLAMA_COLAB #colab does not need all targets, all-major doesnt work correctly with pascal
+			NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all-major
+		else
+			NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all
+		endif #LLAMA_COLAB
+	else
+		ifdef CUDA_MULTI_ARCH
+			NVCCFLAGS += -Wno-deprecated-gpu-targets $(foreach llarch,$(CUDA_MULTI_ARCH),-gencode=arch=compute_$(llarch),code=sm_$(llarch))
+		else
+			NVCCFLAGS += -arch=native
+		endif #CUDA_MULTI_ARCH
+	endif #LLAMA_PORTABLE
 endif # CUDA_DOCKER_ARCH
 
 ifdef LLAMA_CUDA_FORCE_DMMV

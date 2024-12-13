@@ -145,3 +145,5 @@ conda/
 *.ipynb
 
 *.dll
+
+launcher.py

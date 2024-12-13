@@ -27,6 +27,20 @@
 		"header_postfix": "\n"
 	},
 	{
+		"model": "glm",
+		"version": "v3",
+		"beginning": "[gMask]",
+		"sys_start": "<|system",
+		"sys_end": "",
+		"user_start": "<|user",
+		"user_end": "",
+		"model_start": "<|assistant",
+		"model_end": "",
+		"other_start": "<|",
+		"other_end": "",
+		"header_postfix": "|>\n"
+	},
+	{
 		"model": "dolphin",
 		"version": "",
 		"beginning": "<s>",
@@ -56,7 +70,7 @@
 	},
 	{
 		"model": "mistral",
-		"version": "",
+		"version": "1",
 		"beginning": "<|startoftext|>",
 		"sys_start": "<|im_start|>system",
 		"sys_end": "<|im_end|>",
@@ -66,6 +80,20 @@
 		"model_end": "<|im_end|>",
 		"other_start": "<|im_start|>",
 		"other_end": "<|im_end|>",
+		"header_postfix": "\n"
+	},
+	{
+		"model": "mistral",
+		"version": "mixed",
+		"beginning": "<s>",
+		"sys_start": "[INST]system_message",
+		"sys_end": "[/INST]",
+		"user_start": "[INST]user",
+		"user_end": "[/INST]",
+		"model_start": "[INST]assistant",
+		"model_end": "[/INST]",
+		"other_start": "[INST]",
+		"other_end": "[/INST]",
 		"header_postfix": "\n"
 	},
 	{
