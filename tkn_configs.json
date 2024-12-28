@@ -14,6 +14,17 @@
 		"end_prefix": "\n"
 	},
 	{
+		"model": "glm",
+		"version": "v4",
+		"beginning": "[gMask]<sop>",
+		"sys_start": "<|system|>",
+		"user_start": "<|user|>",
+		"model_start": "<|assistant|>",
+		"other_start": "<|",
+		"header_postfix": "|>",
+		"disable_postfix": ["sys", "model", "user"]
+	},
+	{
 		"model": "qwen",
 		"version": "v2",
 		"sys_start": "<|im_start|>system",
@@ -72,15 +83,16 @@
 		"model": "mistral",
 		"version": "mixed",
 		"beginning": "<s>",
-		"sys_start": "[INST]system_message",
-		"sys_end": "[/INST]",
-		"user_start": "[INST]user",
+		"sys_start": "",
+		"sys_end": "\n",
+		"user_start": "[INST]",
 		"user_end": "[/INST]",
-		"model_start": "[INST]assistant",
-		"model_end": "[/INST]",
+		"model_start": "",
+		"model_end": "</s>",
 		"other_start": "[INST]",
-		"other_end": "[/INST]",
-		"header_postfix": "\n"
+		"other_end": "",
+		"header_postfix": "",
+		"disable_postfix": ["sys", "model"]
 	},
 	{
 		"model": "phi",

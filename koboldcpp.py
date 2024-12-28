@@ -45,6 +45,8 @@ handle = None
 friendlymodelname = "inactive"
 friendlysdmodelname = "inactive"
 lastgeneratedcomfyimg = b''
+selected_template = (None, None)
+model_template_info = None
 fullsdmodelpath = ""  #if empty, it's not initialized
 mmprojpath = "" #if empty, it's not initialized
 password = "" #if empty, no auth key required
@@ -891,6 +893,7 @@ def load_model(model_filename):
     ret = handle.load_model(inputs)
     return ret
 
+from importlib import reload
 import koboldcpp_promt_template
 def generate(genparams, is_quiet=False, stream_flag=False):
     global maxctx, args, currentusergenkey, totalgens, pendingabortkey
@@ -901,7 +904,9 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     utfprint('\n================================')
     utfprint(f"接收到的消息：{prompt}\n当前的记忆：{memory}")
     utfprint('--------------------------------')
-    prompt, memory = koboldcpp_promt_template.prompt_template(prompt, memory)
+    reload(koboldcpp_promt_template)
+    prompt, memory, prompt_template_state = koboldcpp_promt_template.prompt_template(
+        prompt, memory, selected_template[0], selected_template[1])
     utfprint(f"模板处理后的消息：{prompt}\n当前的记忆：{memory}")
     utfprint('================================\n')
     
@@ -1100,7 +1105,7 @@ def generate(genparams, is_quiet=False, stream_flag=False):
                 sindex = outstr.find(trim_str)
                 if sindex != -1 and trim_str!="":
                     outstr = outstr[:sindex]
-        outstr = koboldcpp_promt_template.out_post_process(outstr)
+        # outstr = koboldcpp_promt_template.out_post_process(outstr, prompt_template_state)
         return {"text":outstr,"status":ret.status,"stopreason":ret.stopreason,"prompt_tokens":ret.prompt_tokens, "completion_tokens": ret.completion_tokens}
 
 
@@ -1894,6 +1899,7 @@ Enter Prompt:<br>
     def do_GET(self):
         global embedded_kailite, embedded_kcpp_docs, embedded_kcpp_sdui
         global has_multiplayer, multiplayer_turn_major, multiplayer_turn_minor, multiplayer_story_data_compressed, multiplayer_dataformat, multiplayer_lastactive, maxctx, maxhordelen, friendlymodelname, lastgeneratedcomfyimg, KcppVersion, totalgens, preloaded_story, exitcounter, currentusergenkey, friendlysdmodelname, fullsdmodelpath, mmprojpath, password, fullwhispermodelpath
+        global selected_template, model_template_info
         self.path = self.path.rstrip('/')
         response_body = None
         content_type = 'application/json'
@@ -2021,20 +2027,25 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
             response_body = (json.dumps({'result': (friendlymodelname if auth_ok else "koboldcpp/protected-model") }).encode())
 
         elif self.path.endswith('/model_chatml'):
-            gguf = gguf_reader.GGUFReader(args.model_param)
-            content_type = 'text/html'
-            try:
-                chat_template = gguf.fields['tokenizer.chat_template'].parts[4].tolist()
-            except:
-                chat_template = b''
-            response_body = bytes(chat_template)
+            if model_template_info is None:
+                gguf = gguf_reader.GGUFReader(args.model_param)
+                content_type = 'text/html'
+                try:
+                    chat_template = gguf.fields['tokenizer.chat_template'].parts[4].tolist()
+                    model_template_info = chat_template
+                except:
+                    chat_template = b''
+                response_body = bytes(chat_template)
+            else:
+                response_body = bytes(model_template_info)
             
         elif self.path.endswith('/cur_template'):
             try:
                 if not koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING:
                     curcfg = None
                 else:
-                    curcfg = koboldcpp_promt_template.prompt_template_state.current_config
+                    curcfg = koboldcpp_promt_template.TemplateHelper(
+                        selected_template[0], selected_template[1]).current_config
             except Exception as e:
                 utfprint(str(e))
                 curcfg = None
@@ -2042,7 +2053,7 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
             
         elif self.path.endswith('/available_templates'):
             try:
-                allavailables = koboldcpp_promt_template.prompt_template_state.available_configs
+                allavailables = koboldcpp_promt_template.TemplateHelper().available_configs
             except Exception as e:
                 utfprint(str(e))
                 allavailables = None
@@ -2061,7 +2072,8 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
                 if template_modelname is None:
                     koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING = False
                 else:
-                    koboldcpp_promt_template.prompt_template_state.switch_model(template_modelname, template_modelversion)
+                    selected_template = (template_modelname, template_modelversion)
+                    print(f"切换上下文模板为：{selected_template}")
                     koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING = True
                 response_body = json.dumps({"succeed": 1}).encode()
             except Exception as e:
@@ -2223,6 +2235,7 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
 
     def do_POST(self):
         global modelbusy, requestsinqueue, currentusergenkey, totalgens, pendingabortkey, lastgeneratedcomfyimg, multiplayer_turn_major, multiplayer_turn_minor, multiplayer_story_data_compressed, multiplayer_dataformat, multiplayer_lastactive
+        global selected_template
         contlenstr = self.headers['content-length']
         content_length = 0
         body = None
@@ -2301,7 +2314,8 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
                     koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING = False
                 else:
                     koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING = True
-                    koboldcpp_promt_template.prompt_template_state.switch_model(modelname, modelversion)
+                    selected_template = (modelname, modelversion)
+                    print(f'api 切换上下文模板为 {selected_template}')
                 response_code = 200
                 response_body = (json.dumps({"succeed": 1}).encode())
             except Exception as e:

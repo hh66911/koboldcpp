@@ -10,7 +10,6 @@ def debug_print(*args, **kwargs):
 class UserDefinedTags:
     def __init__(self) -> None:
         self.ignore_following = '<IgnoreFollowing>'
-        self.story_mode = '<StoryMode>'
         self.no_new_section = '<ContinueSection>'
         self.comment_start = '<Comment>'
         self.comment_end = '</Comment>'
@@ -44,11 +43,13 @@ class UserDefinedTags:
 
         post_fix_disable = [] if 'disable_postfix' not in config else config['disable_postfix']
         self.sys_start = config['sys_start'] + (self.header_postfix if 'sys' not in post_fix_disable else '')
-        self.sys_end = self.end_prefix + config['sys_end']
+        self.sys_end = self.end_prefix + (config['sys_end'] if 'sys_end' in config else '')
         self.user_start = config['user_start'] + (self.header_postfix if 'user' not in post_fix_disable else '')
-        self.user_end = self.end_prefix + config['user_end']
+        self.user_end = self.end_prefix + (config['user_end'] if 'user_end' in config else '')
         self.model_start = config['model_start'] + (self.header_postfix if 'model' not in post_fix_disable else '')
-        self.model_end = self.end_prefix + config['model_end']
+        self.model_end = self.end_prefix + (config['model_end'] if 'model_end' in config else '')
+        self.mem_start = config['mem_start'] if 'mem_start' in config else '' # mem don't have header postfix
+        self.mem_end = self.end_prefix + (config['mem_end'] if 'mem_end' in config else '')
 
         self.has_other = 'other_start' in config and 'other_end' in config
         if self.has_other:
@@ -61,6 +62,35 @@ class UserDefinedTags:
             self.other_end = ''
 
         debug_print('用户标签配置：', self.__dict__)
+
+
+class ContentBlock:
+    def __init__(self, start: str, content: str,
+                 end: str, new_line=False) -> None:
+        self.start = start
+        self.content = content
+        self.end = end
+        self.new_line = new_line
+        
+    def __str__(self) -> str:
+        return self.start + self.content + self.end + ('\n' if self.new_line else '')
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    def front_insert(self, new_content: str):
+        new_content += self.content
+        return ContentBlock(self.start, new_content,
+                            self.end, self.new_line)
+        
+    def back_insert(self, new_content: str):
+        new_content  = self.content + new_content
+        return ContentBlock(self.start, new_content,
+                            self.end, self.new_line)
+        
+    def strip(self):
+        return ContentBlock(self.start, self.content.strip(),
+                            self.end, self.new_line)
 
 
 class TemplateHelper:
@@ -113,7 +143,7 @@ class TemplateHelper:
 
     def make_block(self, name: str, content: str,
                    with_start=True, with_end=True,
-                   new_line=False):
+                   new_line=False) -> ContentBlock:
         match name:
             case 'sys':
                 start = self.user_tags.sys_start
@@ -124,6 +154,9 @@ class TemplateHelper:
             case 'model':
                 start = self.user_tags.model_start
                 end = self.user_tags.model_end
+            case 'mem':
+                start = self.user_tags.mem_start
+                end = self.user_tags.mem_end
             case _:
                 start = self.user_tags.other_start +\
                     name + self.user_tags.other_postfix
@@ -134,7 +167,7 @@ class TemplateHelper:
         if not with_end:
             end = ''
 
-        return start + content + end + ('\n' if new_line else '')
+        return ContentBlock(start, content, end, new_line)
 
     def process_paragraph(self, cur_paragraph: str):
         alias_tag = self.user_tags.alias_tag
@@ -162,7 +195,8 @@ class TemplateHelper:
             
         return paragraph + '\n'
 
-    def process_section(self, cur_section: list[str]):
+    def process_section(self, cur_section: list[str]
+                        ) -> tuple[ContentBlock | str, bool]:
         section = ''
         self.allow_strip_section = True
         debug_print('当前section:', cur_section)
@@ -172,18 +206,6 @@ class TemplateHelper:
             debug_print('未指定section owner！')
 
         for line in cur_section:
-            # 处理注释
-            if self.user_tags.comment_end in line:
-                self.comment_on = False
-                line = line[line.find(
-                    self.user_tags.comment_end) + len(self.user_tags.comment_end):]
-            if self.comment_on:
-                continue
-                    
-            if self.user_tags.comment_start in line:
-                self.comment_on = True
-                line = line[:line.find(self.user_tags.comment_start)]
-            
             for tag, value in self.user_tags.local_alias_tags.items():
                 if tag in line:
                     self.local_alias = value
@@ -200,16 +222,6 @@ class TemplateHelper:
 
         with_start, with_end = True, True
         new_line = True
-
-        # 处理故事模式
-        if self.story_mode:
-            self.section_owner = 'Narrator'
-            if self.section_idx == 0:
-                with_end = False
-            else:
-                with_start = False
-                with_end = False
-            new_line = False
 
         if self.continuous_generation:
             new_line = False
@@ -255,10 +267,11 @@ class TemplateHelper:
             debug_print('当前section:', section)
             self.reset_local_states()
 
-        return [section, is_block]
+        return (section, is_block)
 
     def process_prompt(self, prompt: str):
-        sections, current_section = [], []
+        sections: list[tuple[ContentBlock | str, bool]] = []
+        current_section = []
         lines: list[str] = prompt.split('\n')
         line_count = len(lines)
         debug_print('当前行数:', line_count)
@@ -267,12 +280,24 @@ class TemplateHelper:
             new_section = False
             section_owner_new = ''
             line = lines[idx]
-
-            colon = line.find(':')
-            if colon != -1 and colon < 50:
-                section_owner_new = line[:colon]
-                line = line[colon + 1:]
-                new_section = True
+            
+            # 处理注释
+            if self.user_tags.comment_end in line and self.comment_on:
+                self.comment_on = False
+                line = line[line.find(
+                    self.user_tags.comment_end) + len(self.user_tags.comment_end):]
+            if self.comment_on:
+                continue
+                    
+            if self.user_tags.comment_start in line:
+                if self.user_tags.comment_end in line:
+                    left = line[:line.find(self.user_tags.comment_start)]
+                    right = line[line.find(self.user_tags.comment_end) + len(self.user_tags.comment_end):]
+                    line = left + right
+                else:
+                    self.comment_on = True
+                    line = line[:line.find(self.user_tags.comment_start)]
+                debug_print('触发 <Comment> line: ', line)
 
             # 处理忽略
             if self.user_tags.ignore_following in line:
@@ -291,6 +316,16 @@ class TemplateHelper:
                     self.process_section(current_section))
                 current_section = []
                 break
+
+            if self.user_tags.no_new_section in line:
+                new_section = False
+                line = line.replace(self.user_tags.no_new_section, '')
+            else:
+                colon = line.find(':')
+                if colon != -1 and colon < 50:
+                    section_owner_new = line[:colon]
+                    line = line[colon + 1:]
+                    new_section = True
 
             if new_section:
                 # 第一个 section
@@ -313,12 +348,19 @@ class TemplateHelper:
             current_section = []
 
         if self.no_next_line:
-            sections[0][0] = sections[0][0].strip()
-            sections[-1][0] = sections[-1][0].strip()
+            sections[0] = (sections[0][0].strip(), sections[0][1])
+            sections[-1] = (sections[-1][0].strip(), sections[-1][1])
             
         debug_print('处理后的sections:', sections)
 
-        return sections
+        blocks: list[ContentBlock] = []
+        for se in sections:
+            if se[1]:
+                blocks.append(se[0])
+            else:
+                blocks[-1] = blocks[-1].back_insert(se[0])
+
+        return blocks
 
     def switch_model(self, model_name: str, model_version: str | None = None):
         if self.lock_config:
@@ -371,112 +413,38 @@ class TemplateHelper:
         return parts
 
 
-prompt_template_state = TemplateHelper()
-
-
-def qwen_prompt_template(prompt: str, memory: str):
-    if prompt_template_state.user_tags.ignore_following in prompt:
-        prompt = prompt[:prompt.rfind(
-            prompt_template_state.user_tags.ignore_following)]
-        prompt_template_state.no_next_line = True
-        prompt_template_state.continuous_generation = True
-    system = ''
-
-    if prompt_template_state.user_tags.story_mode in memory:
-        memory = ''
-        system = '<|im_start|>system\n以下内容是中篇小说\n<|im_end|>\n'
-        prompt_template_state.story_mode = True
-    else:
-        if memory.startswith('System:'):
-            system, memory = memory[7:].split('|')
-            system = '<|im_start|>system\n' + system + '\n<|im_end|>\n'
-        memory = '<|im_end|>\n<|im_start|>memory\n' + memory.strip() + ''
-
-    chat_history = []
-    lines: list[str] = prompt.split('\n')
-    chat_started = False
-    latest_chat = 0
-    for idx in range(len(lines)):
-        line = lines[idx]
-        colon = line.find(':')
-        if colon == -1:
-            chat_history.append(line)
-        else:
-            chat = line[colon + 1:]
-            if prompt_template_state.story_mode:
-                if chat_started:
-                    chater = ''
-                    start_tag = ''
-                else:
-                    chater = 'Narrator\n'
-                    start_tag = '<|im_start|>'
-            else:
-                chater = line[:colon]
-                start_tag = '<|im_end|>\n<|im_start|>' if chat_started else '<|im_start|>'
-                chater = chater + '\n' if len(chat.strip()) > 0 else ''
-
-            line = start_tag + chater + chat
-
-            if len(line.strip()) > 0:
-                chat_history.append(line)
-            chat_started = True
-            latest_chat = idx
-
-    if chat_started and len(memory) > 0:
-        chat_history.insert(latest_chat, memory)
-
-    prompt = '\n'.join(chat_history)
-    prompt = system + prompt
-
-    if not prompt.endswith('\n'):
-        prompt = prompt + '\n'
-    if prompt_template_state.no_next_line:
-        prompt = prompt.strip()
-
-    prompt = prompt_template_state.user_tags.beginning + prompt
-
-    return prompt, ''
-
-
-def normal_prompt_template(prompt: str, memory: str,
-                           subtype = None, subversion = None):
+def normal_prompt_template(state: TemplateHelper, prompt: str, memory: str, subtype = None,
+                           subversion = None):
     # assert subtype in ['yi', 'qwen', 'chatglm', 'yi', 'mistral', "dolphin"]
     if subtype is not None:
-        prompt_template_state.switch_model(subtype, subversion)
+        state.switch_model(subtype, subversion)
 
-    ignore_following_tag = prompt_template_state.user_tags.ignore_following
+    ignore_following_tag = state.user_tags.ignore_following
     if ignore_following_tag in prompt:
         prompt = prompt[:prompt.rfind(
             ignore_following_tag) + len(ignore_following_tag)]
         debug_print('改变的prompt: ', prompt)
 
     system = ''
-    if prompt_template_state.user_tags.story_mode in memory:
-        memory = ''
-        system = prompt_template_state.make_block(
-            'sys', '以下内容是中篇小说', new_line=True)
-        prompt_template_state.story_mode = True
+    if memory.startswith('System:'):
+        system, memory = memory[7:].split(state.user_tags.memory_splitter)
+        system = state.make_block(
+            'sys', system, new_line=True)
+    if memory.strip() != '':
+        memory = str(state.make_block(
+            'mem', memory.strip(), new_line=True))
+
+    blocks = state.process_prompt(prompt)
+    debug_print('组合后的blocks:', blocks)
+
+    if system.strip() != '':
+        system = state.user_tags.beginning + str(system) + '\n'
     else:
-        if memory.startswith('System:'):
-            system, memory = memory[7:].split(prompt_template_state.user_tags.memory_splitter)
-            system = prompt_template_state.make_block(
-                'sys', system, new_line=True)
-        if memory.strip() != '':
-            memory = prompt_template_state.make_block(
-                'memory', memory.strip(), new_line=True)
-
-    prompts = prompt_template_state.process_prompt(prompt)
-    debug_print('处理后的prompts:', prompts)
-    prompts[0][0] = prompt_template_state.user_tags.beginning + system + '\n' + prompts[0][0]
-
-    blocks = []
-    for p in prompts:
-        if p[1]:
-            blocks.append(p[0])
-        else:
-            blocks[-1] += '\n' + p[0]
-
-    prompt = '\n'.join(blocks[:-2]) + (memory + '\n' if memory.strip() != '' else '') + '\n'.join(blocks[-2:])
+        system = ''
+        
+    if memory.strip() != '':
+        blocks[-2] = blocks[-2].front_insert(memory)
+    prompt = system + '\n'.join(map(str, blocks))
 
     return prompt, ''
 
@@ -484,22 +452,19 @@ def normal_prompt_template(prompt: str, memory: str,
 ENABLE_TEMPLATE_PROCESSING = True
 
 
-def prompt_template(prompt, memory):
+def prompt_template(prompt, memory, modelname, modelversion):
     if not ENABLE_TEMPLATE_PROCESSING:
         print('模板处理已禁用')
         return prompt, memory
-    global prompt_template_state
-    last_config : dict = prompt_template_state.current_config
-    prompt_template_state = TemplateHelper(last_config['model'], last_config['version'])
-    prompt_template_state.lock_config = True
+    print(f'正在使用模板名：{modelname}，版本：{modelversion}')
+    state = TemplateHelper(modelname, modelversion)
     print('进入提示词模板生成函数')
-    prompt, memory = normal_prompt_template(prompt, memory)
+    prompt, memory = normal_prompt_template(state, prompt, memory)
     print('生成的提示词完毕\n')
-    prompt_template_state.lock_config = False
-    return prompt, memory
+    return prompt, memory, state
 
 
-def out_post_process(outstr: str):
+def out_post_process(outstr: str, state: TemplateHelper):
     if not ENABLE_TEMPLATE_PROCESSING:
         return outstr
 
@@ -508,9 +473,11 @@ def out_post_process(outstr: str):
     print(outstr)
     print('------输出后------')
 
-    if prompt_template_state.story_mode:
-        outstr = '\r' + outstr
-    outstr = prompt_template_state.split_generated_string(outstr)
+    # if state.story_mode:
+    #     outstr = '\r' + outstr
+    # outstr = state.split_generated_string(outstr)
+    if outstr.strip().endswith(state.user_tags.model_end):
+        outstr = outstr.strip()[:-len(state.user_tags.model_end)]
 
     print(outstr)
     print('======输出后处理完毕======\n\n')
