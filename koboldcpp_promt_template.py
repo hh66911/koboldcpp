@@ -11,6 +11,7 @@ class UserDefinedTags:
     def __init__(self) -> None:
         self.ignore_following = '<IgnoreFollowing>'
         self.story_mode = '<StoryMode>'
+        self.no_new_section = '<ContinueSection>'
         self.comment_start = '<Comment>'
         self.comment_end = '</Comment>'
         self.memory_splitter = '-|-|-'
@@ -75,7 +76,7 @@ class TemplateHelper:
         self.lock_config = False
 
         import json
-        with open("./tkn_configs.json", 'r', encoding='utf-8') as f:
+        with open("tkn_configs.json", 'r', encoding='utf-8') as f:
             self.config_file = json.load(f)
             
         for c in self.config_file:
@@ -108,10 +109,6 @@ class TemplateHelper:
     def reset_local_states(self):
         self.local_alias = None
         self.local_pseudo = None
-        
-    def reset_all_states(self):
-        last_config: dict = self.current_config
-        self = TemplateHelper(last_config['model'], last_config['version'])
         
 
     def make_block(self, name: str, content: str,
@@ -168,8 +165,11 @@ class TemplateHelper:
     def process_section(self, cur_section: list[str]):
         section = ''
         self.allow_strip_section = True
-        debug_print('原始section owner:', self.section_owner)
         debug_print('当前section:', cur_section)
+        if len(self.section_owner) > 0:
+            debug_print('原始section owner:', self.section_owner)
+        else:
+            debug_print('未指定section owner！')
 
         for line in cur_section:
             # 处理注释
@@ -215,6 +215,7 @@ class TemplateHelper:
             new_line = False
             with_end = False
 
+        is_block = False
         debug_print('当前section owner:', self.section_owner)
         if len(self.section_owner) > 0:
             section_name = ''
@@ -249,11 +250,12 @@ class TemplateHelper:
             section = self.make_block(section_name, section,
                                       with_start, with_end,
                                       new_line)
+            is_block = True
             
             debug_print('当前section:', section)
             self.reset_local_states()
 
-        return section
+        return [section, is_block]
 
     def process_prompt(self, prompt: str):
         sections, current_section = [], []
@@ -267,7 +269,7 @@ class TemplateHelper:
             line = lines[idx]
 
             colon = line.find(':')
-            if colon != -1:
+            if colon != -1 and colon < 50:
                 section_owner_new = line[:colon]
                 line = line[colon + 1:]
                 new_section = True
@@ -310,9 +312,11 @@ class TemplateHelper:
                 self.process_section(current_section))
             current_section = []
 
-        sections = '\n'.join(sections)
         if self.no_next_line:
-            sections = sections.strip()
+            sections[0][0] = sections[0][0].strip()
+            sections[-1][0] = sections[-1][0].strip()
+            
+        debug_print('处理后的sections:', sections)
 
         return sections
 
@@ -368,51 +372,6 @@ class TemplateHelper:
 
 
 prompt_template_state = TemplateHelper()
-
-
-def llama_prompt_template(prompt, memory, version: str):
-    prompt_template_state.switch_model('llama', version)
-
-    ignore_following_tag = prompt_template_state.user_tags.ignore_following
-    if ignore_following_tag in prompt:
-        prompt = prompt[:prompt.rfind(
-            ignore_following_tag) + len(ignore_following_tag)]
-
-    if prompt_template_state.user_tags.story_mode in memory:
-        # memory = '<|system|>\n你是专业的故事编写者，请根据用户输入内容续写故事<|end|>\n'
-        # prompt_template_state.story_mode = True
-        debug_print('进入故事模式')
-    else:
-        pass
-    memory = prompt_template_state.make_block(
-        'sys', memory.strip(), new_line=True) + '\n'
-
-    prompt = prompt_template_state.process_prompt(prompt)
-    prompt = prompt_template_state.user_tags.beginning + memory + prompt
-
-    return prompt, ''
-
-
-def phi3_prompt_template(prompt: str, memory: str):
-    prompt_template_state.switch_model('phi',  'v3.5')
-
-    ignore_following_tag = prompt_template_state.user_tags.ignore_following
-    if ignore_following_tag in prompt:
-        prompt = prompt[:prompt.rfind(
-            ignore_following_tag) + len(ignore_following_tag)]
-
-    if prompt_template_state.user_tags.story_mode in memory:
-        # memory = '<|system|>\n你是专业的故事编写者，请根据用户输入内容续写故事<|end|>\n'
-        # prompt_template_state.story_mode = True
-        debug_print('进入故事模式')
-    else:
-        pass
-    memory = '<|system|>\n' + memory + '<|end|>\n'
-
-    prompt = prompt_template_state.process_prompt(prompt)
-    prompt = prompt_template_state.user_tags.beginning + memory + prompt
-
-    return prompt, ''
 
 
 def qwen_prompt_template(prompt: str, memory: str):
@@ -506,17 +465,18 @@ def normal_prompt_template(prompt: str, memory: str,
             memory = prompt_template_state.make_block(
                 'memory', memory.strip(), new_line=True)
 
-    prompt = prompt_template_state.process_prompt(prompt)
-    prompt = prompt_template_state.user_tags.beginning + system + '\n' + prompt
+    prompts = prompt_template_state.process_prompt(prompt)
+    debug_print('处理后的prompts:', prompts)
+    prompts[0][0] = prompt_template_state.user_tags.beginning + system + '\n' + prompts[0][0]
 
-    last_pos = prompt.rfind(prompt_template_state.user_tags.other_end)
-    last_pos = last_pos + len(prompt_template_state.user_tags.other_end)
-    if prompt[last_pos] == '\n':
-        if prompt[last_pos + 1] == '\n':
-            last_pos += 2
+    blocks = []
+    for p in prompts:
+        if p[1]:
+            blocks.append(p[0])
         else:
-            last_pos += 1
-    prompt = prompt[:last_pos] + (memory + '\n' if memory.strip() != '' else '') + prompt[last_pos:]
+            blocks[-1] += '\n' + p[0]
+
+    prompt = '\n'.join(blocks[:-2]) + (memory + '\n' if memory.strip() != '' else '') + '\n'.join(blocks[-2:])
 
     return prompt, ''
 
@@ -529,7 +489,8 @@ def prompt_template(prompt, memory):
         print('模板处理已禁用')
         return prompt, memory
     global prompt_template_state
-    prompt_template_state.reset_all_states()
+    last_config : dict = prompt_template_state.current_config
+    prompt_template_state = TemplateHelper(last_config['model'], last_config['version'])
     prompt_template_state.lock_config = True
     print('进入提示词模板生成函数')
     prompt, memory = normal_prompt_template(prompt, memory)

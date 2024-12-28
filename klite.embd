@@ -4431,7 +4431,7 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 		sampler_order: [6, 0, 1, 3, 4, 2, 5],
 
 		chattemplate_enabled: true,
-		selected_template: [null, null],
+		selected_template: ['', ''],
 	};
 
 	var defaultsettings = JSON.parse(JSON.stringify(localsettings));
@@ -4884,30 +4884,28 @@ pre code,td,th{padding:0}pre code,table{background-color:transparent}.table,inpu
 			});
 		}
 
-		if (localsettings.chattemplate_enabled)
-		{
-			fetch('/available_templates', {
-				method: 'GET'
-			}).then(
-				x => x.json()
-			).then(data => {
-				data = data['result'];
-				all_chat_templates = data;
-				let selidx = -1;
-				let local_last = localsettings.selected_template;
-				for (let idx in data) {
-					if (data[idx][0] == local_last[0] &&
-						data[idx][1] == local_last[1]) {
-						selidx = idx;
-					}
+		
+		fetch('/available_templates', {
+			method: 'GET'
+		}).then(
+			x => x.json()
+		).then(data => {
+			data = data['result'];
+			all_chat_templates = data;
+			let selidx = -1;
+			let local_last = localsettings.selected_template;
+			for (let idx in data) {
+				if (data[idx][0] == local_last[0] &&
+					data[idx][1] == local_last[1]) {
+					selidx = idx;
 				}
-				if (selidx == -1) {
-					localsettings.selected_template = [null, null];
-					localsettings.chattemplate_enabled = false;
-				}
-				toggle_enable_template();
-			});
-		}
+			}
+			if (selidx == -1) {
+				localsettings.selected_template = [null, null];
+				localsettings.chattemplate_enabled = false;
+			}
+			toggle_enable_template();
+		});
 
 		//setup drag and drop zone for files
 		setupDragDrop();

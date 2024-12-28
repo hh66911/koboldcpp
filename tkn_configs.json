@@ -27,20 +27,6 @@
 		"header_postfix": "\n"
 	},
 	{
-		"model": "glm",
-		"version": "v3",
-		"beginning": "[gMask]",
-		"sys_start": "<|system",
-		"sys_end": "",
-		"user_start": "<|user",
-		"user_end": "",
-		"model_start": "<|assistant",
-		"model_end": "",
-		"other_start": "<|",
-		"other_end": "",
-		"header_postfix": "|>\n"
-	},
-	{
 		"model": "dolphin",
 		"version": "",
 		"beginning": "<s>",
@@ -147,5 +133,19 @@
 		"header_postfix": "<|end_header_id|>\n\n",
 		"end_prefix": "\n",
 		"disable_postfix": ["sys"]
+	},
+	{
+		"model": "llama",
+		"version": "darkidol",
+		"beginning": "<|begin_of_text|>",
+		"sys_start": "<|start_header_id|>system",
+		"sys_end": "<|eot_id|>",
+		"user_start": "<|start_header_id|>user",
+		"user_end": "<|eot_id|>",
+		"model_start": "<|start_header_id|>assistant",
+		"model_end": "<|eot_id|>",
+		"other_start": "<|start_header_id|>",
+		"other_end": "<|eot_id|>",
+		"header_postfix": "<|end_header_id|>"
 	}
 ]
