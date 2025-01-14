@@ -140,3 +140,10 @@ conda/
 
 # Jetbrains idea folder
 .idea/
+*.txt
+
+*.ipynb
+
+*.dll
+
+launcher.py
