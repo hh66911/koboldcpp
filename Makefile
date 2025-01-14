@@ -206,15 +206,19 @@ endif
 ifdef CUDA_DOCKER_ARCH
 	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=$(CUDA_DOCKER_ARCH)
 else
-ifdef LLAMA_PORTABLE
-ifdef LLAMA_COLAB #colab does not need all targets, all-major doesnt work correctly with pascal
-	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all-major
-else
-	NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all
-endif #LLAMA_COLAB
-else
-	NVCCFLAGS += -arch=native
-endif #LLAMA_PORTABLE
+	ifdef LLAMA_PORTABLE
+		ifdef LLAMA_COLAB #colab does not need all targets, all-major doesnt work correctly with pascal
+			NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all-major
+		else
+			NVCCFLAGS += -Wno-deprecated-gpu-targets -arch=all
+		endif #LLAMA_COLAB
+	else
+		ifdef CUDA_MULTI_ARCH
+			NVCCFLAGS += -Wno-deprecated-gpu-targets $(foreach llarch,$(CUDA_MULTI_ARCH),-gencode=arch=compute_$(llarch),code=sm_$(llarch))
+		else
+			NVCCFLAGS += -arch=native
+		endif #CUDA_MULTI_ARCH
+	endif #LLAMA_PORTABLE
 endif # CUDA_DOCKER_ARCH
 
 ifdef LLAMA_CUDA_FORCE_DMMV
