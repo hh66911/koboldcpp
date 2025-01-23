@@ -12936,6 +12936,7 @@ initializeInstructUIFunctionality();
 			}
 
 			const rawNewText = newgen;
+			console.log("原始输入: " + rawNewText);
 
 			if (localsettings.opmode == 4)
 			{
@@ -13117,6 +13118,7 @@ initializeInstructUIFunctionality();
 			{
 				// Finds the relevant memory fragments, formats them in a similar way to an authors note and inserts them before WI
 				const ltmSearchQuery = !!rawNewText ? rawNewText : gametext_arr.length > 0 ? gametext_arr.slice(-1)[0] : undefined;
+				console.log("LTM Search Query: ", ltmSearchQuery);
 				if(ltmSearchQuery)
 				{
 					let gameText = concat_gametext(true).replace(/\xA0/g, ' ').trim();

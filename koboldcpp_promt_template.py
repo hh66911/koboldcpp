@@ -445,7 +445,7 @@ def normal_prompt_template(state: TemplateHelper, prompt: str, memory: str, subt
         
     if memory.strip() != '':
         blocks[-2] = blocks[-2].front_insert(memory)
-    prompt = system + '\n'.join(map(str, blocks))
+    prompt = system + ''.join(map(str, blocks))
 
     return prompt, ''
 
@@ -456,7 +456,7 @@ ENABLE_TEMPLATE_PROCESSING = True
 def prompt_template(prompt, memory, modelname, modelversion):
     if not ENABLE_TEMPLATE_PROCESSING:
         print('模板处理已禁用')
-        return prompt, memory
+        return prompt, memory, None
     print(f'正在使用模板名：{modelname}，版本：{modelversion}')
     state = TemplateHelper(modelname, modelversion)
     print('进入提示词模板生成函数')
@@ -465,8 +465,8 @@ def prompt_template(prompt, memory, modelname, modelversion):
     return prompt, memory, state
 
 
-def out_post_process(outstr: str, state: TemplateHelper):
-    if not ENABLE_TEMPLATE_PROCESSING:
+def out_post_process(outstr: str, state: TemplateHelper | None):
+    if not ENABLE_TEMPLATE_PROCESSING or state is None:
         return outstr
 
     print('\n\n======进入输出后处理函数======')

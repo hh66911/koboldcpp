@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from gguf import gguf_reader
 
 # constants
-sampler_order_max = 7
+sampler_order_max = 8
 tensor_split_max = 16
 images_max = 4
 bias_min_value = -100.0
@@ -181,6 +181,7 @@ class generation_inputs(ctypes.Structure):
                 ("temperature", ctypes.c_float),
                 ("top_k", ctypes.c_int),
                 ("top_a", ctypes.c_float),
+                ("top_ns", ctypes.c_float),
                 ("top_p", ctypes.c_float),
                 ("min_p", ctypes.c_float),
                 ("typical_p", ctypes.c_float),
@@ -910,12 +911,18 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     prompt = genparams.get('prompt', "")
     memory = genparams.get('memory', "")
     
+    local_chat_template = genparams.get('chat_template', None)
+    current_selected_template = selected_template if local_chat_template is None else local_chat_template
+    template_name, template_version = current_selected_template
+    
     utfprint('\n================================')
     utfprint(f"接收到的消息：{prompt}\n当前的记忆：{memory}")
     utfprint('--------------------------------')
+    enable_template = koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING
     reload(koboldcpp_promt_template)
+    koboldcpp_promt_template.ENABLE_TEMPLATE_PROCESSING = enable_template
     prompt, memory, prompt_template_state = koboldcpp_promt_template.prompt_template(
-        prompt, memory, selected_template[0], selected_template[1])
+        prompt, memory, template_name, template_version)
     utfprint(f"模板处理后的消息：{prompt}\n当前的记忆：{memory}")
     utfprint('================================\n')
     
@@ -925,6 +932,7 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     temperature = genparams.get('temperature', 0.75)
     top_k = genparams.get('top_k', 100)
     top_a = genparams.get('top_a', 0.0)
+    top_ns = genparams.get('top_ns', 0.0)
     top_p = genparams.get('top_p', 0.92)
     min_p = genparams.get('min_p', 0.0)
     typical_p = genparams.get('typical', 1.0)
@@ -943,7 +951,7 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     dry_sequence_breakers = genparams.get('dry_sequence_breakers', [])
     xtc_threshold = genparams.get('xtc_threshold', 0.2)
     xtc_probability = genparams.get('xtc_probability', 0)
-    sampler_order = genparams.get('sampler_order', [6, 0, 1, 3, 4, 2, 5])
+    sampler_order = genparams.get('sampler_order', [6, 7, 0, 1, 3, 4, 2, 5])
     seed = tryparseint(genparams.get('sampler_seed', -1))
     stop_sequence = genparams.get('stop_sequence', [])
     ban_eos_token = genparams.get('ban_eos_token', False)
@@ -992,6 +1000,7 @@ def generate(genparams, is_quiet=False, stream_flag=False):
     inputs.temperature = temperature
     inputs.top_k = top_k
     inputs.top_a = top_a
+    inputs.top_ns = top_ns
     inputs.top_p = top_p
     inputs.min_p = min_p
     inputs.typical_p = typical_p
@@ -1105,6 +1114,41 @@ def generate(genparams, is_quiet=False, stream_flag=False):
         pendingabortkey = ""
         return {"text":"","status":-1,"stopreason":-1, "prompt_tokens":0, "completion_tokens": 0, "total_tokens": 0}
     else:
+        def format_structure(struct, indent=0):
+            result = []
+            indent_str = " " * indent
+            for field_name, field_type in struct._fields_:
+                if field_name in ['prompt', 'memory', 'images']:
+                    continue
+                value = getattr(struct, field_name)
+                # 处理指针类型
+                if isinstance(value, ctypes.POINTER(ctypes.c_char_p)):
+                    if value:
+                        value = [v.decode() if v else None for v in value[:struct.dry_sequence_breakers_len]]
+                    else:
+                        value = None
+                elif isinstance(value, ctypes.POINTER(logit_bias)):
+                    if value:
+                        value = [format_structure(v, indent + 4) for v in value[:struct.logit_biases_len]]
+                    else:
+                        value = None
+                elif isinstance(value, ctypes.POINTER(ctypes.c_char_p)):
+                    if value:
+                        value = [v.decode() if v else None for v in value[:struct.banned_tokens_len]]
+                    else:
+                        value = None
+                # 处理数组类型
+                elif isinstance(value, ctypes.Array):
+                    value = list(value)
+                # 处理字节字符串
+                elif isinstance(value, bytes):
+                    value = value.decode()
+                # 处理嵌套结构体
+                elif isinstance(value, ctypes.Structure):
+                    value = format_structure(value, indent + 4)
+                result.append(f"{indent_str}{field_name}: {value}")
+            return ", ".join(result)
+        print(f"\nGenerating with input params: {format_structure(inputs)}")
         ret = handle.generate(inputs)
         outstr = ""
         if ret.status==1:
@@ -2747,10 +2791,10 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
 
                 genparams = None
                 try:
-                    print('\n========================================')
-                    print("JSON体: ")
-                    print(body)
-                    print('========================================\n')
+                    # print('\n========================================')
+                    # print("JSON体: ")
+                    # print(body)
+                    # print('========================================\n')
                     genparams = json.loads(body)
                 except Exception:
                     genparams = None
@@ -2769,7 +2813,7 @@ Add/QvJP/skfyP8BnWh46M1E/qoAAAAASUVORK5CYII=",
                         }}).encode())
                         return
 
-                utfprint("\nInput: " + json.dumps(genparams),1)
+                # utfprint("\nInput: " + json.dumps(genparams),1)
 
                 if args.foreground:
                     bring_terminal_to_foreground()

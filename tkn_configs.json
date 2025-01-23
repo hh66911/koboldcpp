@@ -159,5 +159,12 @@
 		"other_start": "<|start_header_id|>",
 		"other_end": "<|eot_id|>",
 		"header_postfix": "<|end_header_id|>"
+	},
+	{
+		"model": "empty",
+		"version": "all",
+		"sys_start": "",
+		"model_start": "",
+		"user_start": ""
 	}
 ]
