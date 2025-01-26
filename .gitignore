@@ -130,6 +130,8 @@ rocblas.dll
 hipblas.dll
 koboldcpp_hipblas.so
 koboldcpp_hipblas.dll
+*.dll
+*.ipynb
 
 bin/
 conda/
