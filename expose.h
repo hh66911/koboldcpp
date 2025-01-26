@@ -15,6 +15,7 @@ enum samplers
     KCPP_SAMPLER_TYP=4,
     KCPP_SAMPLER_TEMP=5,
     KCPP_SAMPLER_REP_PEN=6,
+	KCPP_SAMPLER_TOP_NS=7,
     KCPP_SAMPLER_MAX
 };
 enum stop_reason
@@ -76,6 +77,7 @@ struct generation_inputs
     const float temperature = 0.0f;
     const int top_k = 0;
     const float top_a = 0.0f;
+	const float top_ns = 0.0f;
     const float top_p = 0.0f;
     const float min_p = 0.0f;
     const float typical_p = 0;

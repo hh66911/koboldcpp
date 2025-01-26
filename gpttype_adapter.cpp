@@ -911,6 +911,44 @@ void sample_top_a(llama_token_data_array * candidates, float a, size_t min_keep)
     candidates->size = last_idx;
 }
 
+// Top-nσ (https://arxiv.org/abs/2411.07641)
+void sample_top_n_sigma(llama_token_data_array* candidates, float n, size_t min_keep) {
+    if (n <= 0.0f || candidates->size<=1) {
+        return;
+    }
+
+    // Compute the cumulative probabilities
+    float maxprob = candidates->data[0].p;
+
+	float sum = 0.0f;
+	float standard_deivation = 0.0f;
+	for (size_t i = 0; i < candidates->size; ++i) {
+		sum += candidates->data[i].logit;
+	}
+	float mean = sum / candidates->size;
+	for (size_t i = 0; i < candidates->size; ++i) {
+		standard_deivation += powf(candidates->data[i].logit - mean, 2);
+	}
+	standard_deivation = sqrtf(standard_deivation / (candidates->size - 1));
+
+    float threshold = maxprob - n * standard_deivation; //tokens with probs less than this are removed
+    size_t last_idx = candidates->size;
+
+    for (size_t i = 0; i < candidates->size; ++i) {
+        // Go until we reach a value under the threshold
+        float checkprob = candidates->data[i].p;
+        if (checkprob < threshold && i >= min_keep) {
+            last_idx = i;
+            break;
+        }
+    }
+    // printf("\n\nCandidates: %d, A:%f, MaxProb: %f, Threshold: %f, LastIdx: %d",candidates->size,a,maxprob,threshold,last_idx);
+    // printf("\nCandidates: %f %f %f %f\n",candidates->data[0].p,candidates->data[1].p,candidates->data[2].p,candidates->data[3].p);
+
+    // Resize the output vector to keep only the selected tokens
+    candidates->size = last_idx;
+}
+
 void sample_xtc(llama_token_data_array * candidates, float xtc_threshold, float xtc_probability, std::mt19937 & rng)
 {
     if (xtc_threshold > 0.5f || xtc_probability <= 0.0f || candidates->size <= 1) {
@@ -1559,9 +1597,7 @@ void sample_grammar(FileFormat file_format, int32_t n_vocab, llama_token_data_ar
 
 }
 
-int SampleLogits(const float * logits, int n_ctx, int n_vocab, int rep_pen_range, float rep_pen, float rep_pen_slope, float presence_penalty, float top_k, float top_a, float top_p, float min_p, float typical_p, float tfs, float temp, std::mt19937 & rng,
-int mirostat, float mirostat_tau, float mirostat_eta, float dry_multiplier, float dry_base, int dry_allowed_length, int dry_penalty_last_n, float xtc_threshold, float xtc_probability,
-const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dynatemp_range, float dynatemp_exponent, float smoothing_factor)
+int SampleLogits(const float * logits, int n_ctx, int n_vocab, int rep_pen_range, float rep_pen, float rep_pen_slope, float presence_penalty, float top_k, float top_a, float top_ns, float top_p, float min_p, float typical_p, float tfs, float temp, std::mt19937 & rng, int mirostat, float mirostat_tau, float mirostat_eta, float dry_multiplier, float dry_base, int dry_allowed_length, int dry_penalty_last_n, float xtc_threshold, float xtc_probability, const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dynatemp_range, float dynatemp_exponent, float smoothing_factor)
 {
     int id = 0;
     std::vector<llama_token_data> candidates;
@@ -1644,6 +1680,9 @@ const std::vector<samplers> & sampler_order, llama_grammar * grammar, float dyna
                 case KCPP_SAMPLER_REP_PEN:
                     sample_rep_pen(n_ctx, rep_pen_range, rep_pen, rep_pen_slope, presence_penalty, &candidates_p);
                     break;
+				case KCPP_SAMPLER_TOP_NS:
+					sample_top_n_sigma(&candidates_p, top_ns, 1);
+					break;
                 default:
                     printf("\nSampleLogits: Unknown Sampler : %d",sampler_order[i]);
                     break;
@@ -3499,6 +3538,7 @@ generation_outputs gpttype_generate(const generation_inputs inputs)
             const float min_p = kcpp_data->min_p;
             const float temp = kcpp_data->temp;
             const float top_a = inputs.top_a;
+			const float top_ns = inputs.top_ns;
             const float repeat_penalty = kcpp_data->repeat_penalty;
             const float presence_penalty = kcpp_data->presence_penalty;
             const float typical_p = kcpp_data->typical_p;
@@ -3598,7 +3638,7 @@ generation_outputs gpttype_generate(const generation_inputs inputs)
                 }
 
                 id = SampleLogits(logitsPtr, nctx, n_vocab, last_n_size, repeat_penalty, kcpp_data->rep_pen_slope, presence_penalty,
-                top_k, top_a, top_p, min_p, typical_p, tfs_z, temp, rng,
+                top_k, top_a, top_ns, top_p, min_p, typical_p, tfs_z, temp, rng,
                 kcpp_data->mirostat, kcpp_data->mirostat_tau, kcpp_data->mirostat_eta,
                 kcpp_data->dry_multiplier, kcpp_data->dry_base,
                 kcpp_data->dry_allowed_length, kcpp_data->dry_penalty_last_n, kcpp_data->xtc_threshold, kcpp_data->xtc_probability,

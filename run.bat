@@ -1,0 +1,1 @@
+start /AFFINITY 0x0000FFFF python koboldcpp.py
